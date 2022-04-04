@@ -1,5 +1,5 @@
 ---
-title: เราควรออกแบบวิธีการจัดเก็บ password อย่างไรดี
+title: 'เราควรออกแบบวิธีการจัดเก็บ password อย่างไรดี'
 date: '2017-06-01'
 tags: ['security', 'nodejs']
 draft: false

@@ -1,6 +1,6 @@
 ---
-title: Hello REACT
-date: '2017-11-10'
+title: 'Hello REACT'
+date: '2017-11-08'
 tags: ['react']
 draft: false
 summary: 'มาลองสร้างโปรแกรมแรกกับ React กัน'

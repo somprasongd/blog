@@ -1,7 +1,7 @@
 ---
 title: การแก้ไข build script สำหรับการทำไฟล์ติดตั้ง Netbeans Platform
 date: '2015-12-15'
-tags: ['config', 'netbeans', 'ide']
+tags: ['netbeans']
 draft: false
 summary: 'การแก้ไข build script สำหรับการทำไฟล์ติดตั้ง Netbeans Platform'
 ---

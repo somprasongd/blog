@@ -1,5 +1,5 @@
 ---
-title: Webpack 4
+title: 'Webpack 4'
 date: '2018-05-28'
 tags: ['webpack', 'javascript']
 draft: false

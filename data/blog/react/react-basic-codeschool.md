@@ -1,5 +1,5 @@
 ---
-title: สรุป React คืออะไรจาก codeschool
+title: 'สรุป React คืออะไรจาก codeschool'
 date: '2017-11-08'
 tags: ['react']
 draft: false
