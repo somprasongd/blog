@@ -3,6 +3,7 @@ import PageTitle from '@/components/PageTitle'
 import generateRss from '@/lib/generate-rss'
 import { MDXLayoutRenderer } from '@/components/MDXComponents'
 import { formatSlug, getAllFilesFrontMatter, getFileBySlug, getFiles } from '@/lib/mdx'
+import generateFeaturedImage from '@/lib/generate-featured-image'
 
 const DEFAULT_LAYOUT = 'PostLayout'
 
@@ -19,6 +20,7 @@ export async function getStaticPaths() {
 }
 
 export async function getStaticProps({ params }) {
+  // const allAuthors = await getAllFilesFrontMatter('authors')
   const allPosts = await getAllFilesFrontMatter('blog')
   const postIndex = allPosts.findIndex((post) => formatSlug(post.slug) === params.slug.join('/'))
   const prev = allPosts[postIndex + 1] || null
@@ -30,6 +32,12 @@ export async function getStaticProps({ params }) {
     return authorResults.frontMatter
   })
   const authorDetails = await Promise.all(authorPromise)
+
+  // featured image
+  if (!post.frontMatter.draft && !post.frontMatter.images) {
+    const featuredImage = await generateFeaturedImage(post)
+    post.frontMatter.images = [featuredImage]
+  }
 
   // rss
   if (allPosts.length > 0) {
