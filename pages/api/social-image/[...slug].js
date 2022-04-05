@@ -143,6 +143,7 @@ export default async (req, res) => {
             </style>
         </html>`)
     const screenShotBuffer = await page.screenshot()
+    browser.close()
     res.writeHead(200, {
       'Content-Type': 'image/png',
       'Content-Length': Buffer.byteLength(screenShotBuffer),
