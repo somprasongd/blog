@@ -9,7 +9,9 @@ import chromium from 'chrome-aws-lambda'
 
 // eslint-disable-next-line import/no-anonymous-default-export
 export default async (req, res) => {
-  const postSlug = req.query.slug.join('/').replace('.jpg', '')
+  //   const postSlug = req.query.slug.join('/').replace('.jpg', '')
+  // blog_go_go-fundamentals.jpg to blog/go/go-fundamentals.jpg
+  const postSlug = req.query.post.split('_').join('/').replace('.jpg', '')
 
   const post = await getFileBySlug('blog', postSlug.substring(5))
   console.log(post.frontMatter)
