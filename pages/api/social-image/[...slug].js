@@ -38,7 +38,7 @@ export default async (req, res) => {
   //     res.send(imageBuffer)
   //   } else {
   // Posts without images
-  fs.readdirSync('./').forEach((file) => {
+  fs.readdirSync('./.next').forEach((file) => {
     console.log(file)
   })
   const imageAvatar = fs.readFileSync('./public/static/images/avatar.png')
