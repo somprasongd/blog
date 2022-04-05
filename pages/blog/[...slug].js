@@ -32,7 +32,6 @@ export async function getStaticProps({ params }) {
     return authorResults.frontMatter
   })
   const authorDetails = await Promise.all(authorPromise)
-
   // can not run on vercal Hobby plan
   // // featured image
   // if (!post.frontMatter.draft && !post.frontMatter.images) {

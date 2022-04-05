@@ -1,8 +1,8 @@
 // NodeJS Core
 import fs from 'fs'
-import path from 'path'
+// import path from 'path'
 
-import { getFileBySlug } from '../../lib/mdx'
+// import { getFileBySlug } from '../../lib/mdx'
 
 // Libs
 import chromium from 'chrome-aws-lambda'
@@ -11,45 +11,59 @@ import chromium from 'chrome-aws-lambda'
 export default async (req, res) => {
   //   const postSlug = req.query.slug.join('/').replace('.jpg', '')
   // blog_go_go-fundamentals.jpg to blog/go/go-fundamentals.jpg
-  const postSlug = req.query.post.split('_').join('/').replace('.jpg', '')
+  //   const postSlug = req.query.post.split('_').join('/').replace('.jpg', '')
 
-  const post = await getFileBySlug('blog', postSlug.substring(5))
+  //   const post = await getFileBySlug('blog', postSlug.substring(5))
+  const post = {
+    frontMatter: {
+      readingTime: { text: '15 min read', minutes: 14.455, time: 867300, words: 2891 },
+      slug: 'go/go-fundamentals',
+      fileName: 'go/go-fundamentals.mdx',
+      title: 'Go Fundamentals',
+      date: '2022-01-19T00:00:00.000Z',
+      tags: ['go'],
+      draft: false,
+      summary:
+        'บทความแรกของการศึกษาภาษา Go เพื่อนำไปสร้าง API จะเริ่มจากการศึกษาพื้นฐานภาษา Go ก่อนว่าเขียนยังไง',
+      //   images: ['/api/social-image/blog_go_go-fundamentals.jpg'],
+    },
+  }
   console.log(post.frontMatter)
-  if (post.frontMatter.images) {
-    // Posts with images
-    const filePath = path.resolve('./public/', post.frontMatter.images[0])
-    const imageBuffer = fs.readFileSync(filePath)
+  //   if (post.frontMatter.images) {
+  //     // Posts with images
+  //     const filePath = path.resolve('./public/', post.frontMatter.images[0])
+  //     const imageBuffer = fs.readFileSync(filePath)
 
-    res.setHeader('Content-Type', 'image/jpg')
-    res.send(imageBuffer)
-  } else {
-    // Posts without images
-    const imageAvatar = fs.readFileSync('./public/static/images/avatar.png')
-    const base64Image = new Buffer.from(imageAvatar).toString('base64')
-    const dataURI = 'data:image/jpeg;base64,' + base64Image
-    const originalDate = new Date(post.frontMatter.date)
-    const formattedDate = `${originalDate.getDate()}/${('0' + (originalDate.getMonth() + 1)).slice(
-      -2
-    )}/${originalDate.getFullYear()}`
+  //     res.setHeader('Content-Type', 'image/jpg')
+  //     res.send(imageBuffer)
+  //   } else {
+  // Posts without images
+  const imageAvatar = fs.readFileSync('./public/static/images/avatar.png')
+  const base64Image = new Buffer.from(imageAvatar).toString('base64')
+  const dataURI = 'data:image/jpeg;base64,' + base64Image
+  const originalDate = new Date(post.frontMatter.date)
+  const formattedDate = `${originalDate.getDate()}/${('0' + (originalDate.getMonth() + 1)).slice(
+    -2
+  )}/${originalDate.getFullYear()}`
 
-    const browser = await chromium.puppeteer.launch({
-      args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath,
-      headless: true,
-      ignoreHTTPSErrors: true,
-    })
+  const browser = await chromium.puppeteer.launch({
+    args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
+    defaultViewport: chromium.defaultViewport,
+    executablePath: await chromium.executablePath,
+    headless: true,
+    ignoreHTTPSErrors: true,
+  })
 
-    const tags =
-      post.frontMatter.tags
-        ?.map((tag) => {
-          return `#${tag}`
-        })
-        .join(' | ') || ''
+  const tags =
+    post.frontMatter.tags
+      ?.map((tag) => {
+        return `#${tag}`
+      })
+      .join(' | ') || ''
 
-    const page = await browser.newPage()
-    page.setViewport({ width: 1128, height: 600 })
-    page.setContent(`<html>
+  const page = await browser.newPage()
+  page.setViewport({ width: 1128, height: 600 })
+  page.setContent(`<html>
             <body>
                 <div class="social-image-content">
                     <h1>
@@ -144,12 +158,12 @@ export default async (req, res) => {
                 }
             </style>
         </html>`)
-    const screenShotBuffer = await page.screenshot()
-    browser.close()
-    res.writeHead(200, {
-      'Content-Type': 'image/png',
-      'Content-Length': Buffer.byteLength(screenShotBuffer),
-    })
-    res.end(screenShotBuffer)
-  }
+  const screenShotBuffer = await page.screenshot()
+  browser.close()
+  res.writeHead(200, {
+    'Content-Type': 'image/png',
+    'Content-Length': Buffer.byteLength(screenShotBuffer),
+  })
+  res.end(screenShotBuffer)
+  //   }
 }
