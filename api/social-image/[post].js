@@ -2,7 +2,7 @@
 import fs from 'fs'
 import path from 'path'
 
-import { getFileBySlug } from '@/lib/mdx'
+import { getFileBySlug } from '../../lib/mdx'
 
 // Libs
 import chromium from 'chrome-aws-lambda'
