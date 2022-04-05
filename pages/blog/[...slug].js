@@ -3,7 +3,7 @@ import PageTitle from '@/components/PageTitle'
 import generateRss from '@/lib/generate-rss'
 import { MDXLayoutRenderer } from '@/components/MDXComponents'
 import { formatSlug, getAllFilesFrontMatter, getFileBySlug, getFiles } from '@/lib/mdx'
-import generateFeaturedImage from '@/lib/generate-featured-image'
+// import generateFeaturedImage from '@/lib/generate-featured-image'
 
 const DEFAULT_LAYOUT = 'PostLayout'
 
