@@ -33,11 +33,12 @@ export async function getStaticProps({ params }) {
   })
   const authorDetails = await Promise.all(authorPromise)
 
-  // featured image
-  if (!post.frontMatter.draft && !post.frontMatter.images) {
-    const featuredImage = await generateFeaturedImage(post)
-    post.frontMatter.images = [featuredImage]
-  }
+  // can not run on vercal Hobby plan
+  // // featured image
+  // if (!post.frontMatter.draft && !post.frontMatter.images) {
+  //   const featuredImage = await generateFeaturedImage(post)
+  //   post.frontMatter.images = [featuredImage]
+  // }
 
   // rss
   if (allPosts.length > 0) {
