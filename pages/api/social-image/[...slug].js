@@ -38,10 +38,10 @@ export default async (req, res) => {
   //     res.send(imageBuffer)
   //   } else {
   // Posts without images
-  fs.readdirSync('./.next').forEach((file) => {
+  fs.readdirSync('./static').forEach((file) => {
     console.log(file)
   })
-  const imageAvatar = fs.readFileSync('./public/static/images/avatar.png')
+  const imageAvatar = fs.readFileSync('./static/images/avatar.png')
   const base64Image = new Buffer.from(imageAvatar).toString('base64')
   const dataURI = 'data:image/jpeg;base64,' + base64Image
   const originalDate = new Date(post.frontMatter.date)
