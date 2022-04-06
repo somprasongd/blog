@@ -16,12 +16,7 @@ export default async (req, res) => {
   //   const post = await getFileBySlug('blog', postSlug.substring(5))
   const post = {
     frontMatter: {
-      readingTime: {
-        text: '15 min read',
-        minutes: 14.455,
-        time: 867300,
-        words: 2891,
-      },
+      readingTime: { text: '15 min read', minutes: 14.455, time: 867300, words: 2891 },
       slug: 'go/go-fundamentals',
       fileName: 'go/go-fundamentals.mdx',
       title: 'Go Fundamentals',
@@ -47,14 +42,13 @@ export default async (req, res) => {
   fs.readdirSync(__dirname).forEach((file) => {
     console.log(file)
   })
-  const imageAvatar = fs.readFileSync('./.output/static/images/avatar.png')
+  const imageAvatar = fs.readFileSync(__dirname + '/static/images/avatar.png')
   const base64Image = new Buffer.from(imageAvatar).toString('base64')
-  const dataURI = 'data:image/jpegbase64,' + base64Image
+  const dataURI = 'data:image/jpeg;base64,' + base64Image
   const originalDate = new Date(post.frontMatter.date)
-  const formattedDate = `${originalDate.getDate()}/${(
-    '0' +
-    (originalDate.getMonth() + 1)
-  ).slice(-2)}/${originalDate.getFullYear()}`
+  const formattedDate = `${originalDate.getDate()}/${('0' + (originalDate.getMonth() + 1)).slice(
+    -2
+  )}/${originalDate.getFullYear()}`
 
   const browser = await chromium.puppeteer.launch({
     args: [...chromium.args, '--hide-scrollbars', '--disable-web-security'],
