@@ -13,6 +13,14 @@ if (process.env.NODE_ENV === 'production') {
 
 // eslint-disable-next-line import/no-anonymous-default-export
 export default async (req, res) => {
+  console.log(basePath)
+  fs.readdirSync(basePath).forEach((file) => {
+    console.log(file)
+  })
+  console.log('../')
+  fs.readdirSync('../').forEach((file) => {
+    console.log(file)
+  })
   const postSlug = req.query.slug.join('/').replace('.jpg', '')
   const post = await getFileBySlug('blog', postSlug.substring(5))
   // const post = {
