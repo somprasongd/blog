@@ -6,19 +6,26 @@ import path from 'path'
 import chromium from 'chrome-aws-lambda'
 import matter from 'gray-matter'
 
-let basePath = process.cwd()
-if (process.env.NODE_ENV === 'production') {
-  basePath = path.join(process.cwd(), '.next/server/chunks')
-}
-
 // eslint-disable-next-line import/no-anonymous-default-export
 export default async (req, res) => {
-  console.log(basePath)
+  let basePath = process.cwd()
+  if (process.env.NODE_ENV === 'production') {
+    basePath = path.join(process.cwd(), '.next/server/chunks')
+  }
+  console.log('basePath', basePath)
   fs.readdirSync(basePath).forEach((file) => {
+    console.log(file)
+  })
+  console.log('./')
+  fs.readdirSync('./').forEach((file) => {
     console.log(file)
   })
   console.log('../')
   fs.readdirSync('../').forEach((file) => {
+    console.log(file)
+  })
+  console.log('/var/task')
+  fs.readdirSync('/var/task').forEach((file) => {
     console.log(file)
   })
   const postSlug = req.query.slug.join('/').replace('.jpg', '')
@@ -179,6 +186,10 @@ export default async (req, res) => {
 }
 
 function getFileBySlug(type, slug) {
+  let basePath = process.cwd()
+  if (process.env.NODE_ENV === 'production') {
+    basePath = path.join(process.cwd(), '.next/server/chunks')
+  }
   const mdxPath = path.join(basePath, 'data', type, `${slug}.mdx`)
   const mdPath = path.join(basePath, 'data', type, `${slug}.md`)
   const source = fs.existsSync(mdxPath)
