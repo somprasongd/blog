@@ -13,10 +13,6 @@ let basePath = process.cwd()
 
 // eslint-disable-next-line import/no-anonymous-default-export
 export default async (req, res) => {
-  console.log('basePath', basePath)
-  fs.readdirSync(basePath).forEach((file) => {
-    console.log(file)
-  })
   const postSlug = req.query.slug.join('/').replace('.jpg', '')
   const post = await getFileBySlug('blog', postSlug.substring(5))
   const imageAvatar = fs.readFileSync(basePath + '/public/static/images/avatar.png')

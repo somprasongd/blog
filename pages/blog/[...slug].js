@@ -3,6 +3,7 @@ import PageTitle from '@/components/PageTitle'
 import generateRss from '@/lib/generate-rss'
 import { MDXLayoutRenderer } from '@/components/MDXComponents'
 import { formatSlug, getAllFilesFrontMatter, getFileBySlug, getFiles } from '@/lib/mdx'
+import siteMetadata from '@/data/siteMetadata'
 // import generateFeaturedImage from '@/lib/generate-featured-image'
 
 const DEFAULT_LAYOUT = 'PostLayout'
@@ -38,6 +39,11 @@ export async function getStaticProps({ params }) {
   //   const featuredImage = await generateFeaturedImage(post)
   //   post.frontMatter.images = [featuredImage]
   // }
+
+  if (!post.frontMatter.draft && !post.frontMatter.images && !siteMetadata.socialBanner) {
+    const featuredImage = '/api/social-image/blog/' + params.slug.join('/') + '.jpg'
+    post.frontMatter.images = [featuredImage]
+  }
 
   // rss
   if (allPosts.length > 0) {
