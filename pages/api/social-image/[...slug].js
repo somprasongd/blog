@@ -1,33 +1,34 @@
 // NodeJS Core
 import fs from 'fs'
-// import path from 'path'
-
-// import { getFileBySlug } from '../../lib/mdx'
+import path from 'path'
 
 // Libs
 import chromium from 'chrome-aws-lambda'
+import matter from 'gray-matter'
+
+let basePath = process.cwd()
+if (process.env.NODE_ENV === 'production') {
+  basePath = path.join(process.cwd(), '.next/server/chunks')
+}
 
 // eslint-disable-next-line import/no-anonymous-default-export
 export default async (req, res) => {
-  //   const postSlug = req.query.slug.join('/').replace('.jpg', '')
-  // blog_go_go-fundamentals.jpg to blog/go/go-fundamentals.jpg
-  //   const postSlug = req.query.post.split('_').join('/').replace('.jpg', '')
-
-  //   const post = await getFileBySlug('blog', postSlug.substring(5))
-  const post = {
-    frontMatter: {
-      readingTime: { text: '15 min read', minutes: 14.455, time: 867300, words: 2891 },
-      slug: 'go/go-fundamentals',
-      fileName: 'go/go-fundamentals.mdx',
-      title: 'Go Fundamentals',
-      date: '2022-01-19T00:00:00.000Z',
-      tags: ['go'],
-      draft: false,
-      summary:
-        'บทความแรกของการศึกษาภาษา Go เพื่อนำไปสร้าง API จะเริ่มจากการศึกษาพื้นฐานภาษา Go ก่อนว่าเขียนยังไง',
-      //   images: ['/api/social-image/blog_go_go-fundamentals.jpg'],
-    },
-  }
+  const postSlug = req.query.slug.join('/').replace('.jpg', '')
+  const post = await getFileBySlug('blog', postSlug.substring(5))
+  // const post = {
+  //   frontMatter: {
+  //     readingTime: { text: '15 min read', minutes: 14.455, time: 867300, words: 2891 },
+  //     slug: 'go/go-fundamentals',
+  //     fileName: 'go/go-fundamentals.mdx',
+  //     title: 'Go Fundamentals',
+  //     date: '2022-01-19T00:00:00.000Z',
+  //     tags: ['go'],
+  //     draft: false,
+  //     summary:
+  //       'บทความแรกของการศึกษาภาษา Go เพื่อนำไปสร้าง API จะเริ่มจากการศึกษาพื้นฐานภาษา Go ก่อนว่าเขียนยังไง',
+  //     //   images: ['/api/social-image/blog_go_go-fundamentals.jpg'],
+  //   },
+  // }
   // console.log(post.frontMatter)
   //   if (post.frontMatter.images) {
   //     // Posts with images
@@ -38,11 +39,8 @@ export default async (req, res) => {
   //     res.send(imageBuffer)
   //   } else {
   // Posts without images
-  console.log(__dirname)
-  fs.readdirSync(__dirname).forEach((file) => {
-    console.log(file)
-  })
-  const imageAvatar = fs.readFileSync(__dirname + '/static/images/avatar.png')
+
+  const imageAvatar = fs.readFileSync(basePath + '/public/static/images/avatar.png')
   const base64Image = new Buffer.from(imageAvatar).toString('base64')
   const dataURI = 'data:image/jpeg;base64,' + base64Image
   const originalDate = new Date(post.frontMatter.date)
@@ -76,7 +74,7 @@ export default async (req, res) => {
                     <div class="social-image-footer">
                         <div class="social-image-footer-left">
                             <img src="${dataURI}" />
-                            <span>somprasong.work · ${formattedDate} · ${post.frontMatter.readingTime.text} </span>
+                            <span>somprasong.work · ${formattedDate} </span>
                         </div>
                         <div class="social-image-footer-right">
                             ${tags}
@@ -170,4 +168,23 @@ export default async (req, res) => {
   })
   res.end(screenShotBuffer)
   //   }
+}
+
+function getFileBySlug(type, slug) {
+  const mdxPath = path.join(basePath, 'data', type, `${slug}.mdx`)
+  const mdPath = path.join(basePath, 'data', type, `${slug}.md`)
+  const source = fs.existsSync(mdxPath)
+    ? fs.readFileSync(mdxPath, 'utf8')
+    : fs.readFileSync(mdPath, 'utf8')
+
+  const { data: frontmatter } = matter(source)
+
+  return {
+    frontMatter: {
+      // slug: slug || null,
+      // fileName: fs.existsSync(mdxPath) ? `${slug}.mdx` : `${slug}.md`,
+      ...frontmatter,
+      date: frontmatter.date ? new Date(frontmatter.date).toISOString() : null,
+    },
+  }
 }

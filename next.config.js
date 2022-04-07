@@ -1,3 +1,5 @@
+const CopyPlugin = require('copy-webpack-plugin')
+
 const withBundleAnalyzer = require('@next/bundle-analyzer')({
   enabled: process.env.ANALYZE === 'true',
 })
@@ -80,6 +82,22 @@ module.exports = withBundleAnalyzer({
         'react-dom/test-utils': 'preact/test-utils',
         'react-dom': 'preact/compat',
       })
+    }
+
+    // Fixes npm packages that depend on `fs` module
+    if (!isServer) {
+      config.resolve.fallback.fs = false
+    }
+    // copy files you're interested in
+    if (!dev) {
+      config.plugins.push(
+        new CopyPlugin({
+          patterns: [
+            { from: 'data/blog', to: 'data/blog' },
+            { from: 'public/static/images/avatar.png', to: 'public/static/images/avatar.png' },
+          ],
+        })
+      )
     }
 
     return config
