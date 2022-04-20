@@ -1,6 +1,7 @@
 ---
 title: 'API Service with Go: Zero to Production'
 date: '2022-01-20'
+lastmod: '2022-04-20'
 tags: ['go', 'api', 'docker', 'log']
 draft: false
 summary: 'จะสอนสร้าง API Service ด้วยภาษา Go ตั้งแต่เริ่มต้น จนถึงการ deploy ใช้งานจริง'
@@ -8,21 +9,30 @@ summary: 'จะสอนสร้าง API Service ด้วยภาษา Go
 
 # API Service with Go: Zero to Production
 
-หลังจากที่ได้ศึกษาพื้นฐานภาษา Go รวมถึงการทำ CRUD กับฐานข้อมูลแบบ SQL มาแล้ว ก็จะมาลองสร้าง API Service กัน ซึ่ง API นั้นจะใช้เป็นเป็นตัวกลางระหว่าง Application 2 ตัว หรือระหว่าง UI กับ Database ให้สามารถคุยกันได้ง่ายขึ้น โดยจะต้องมีการกำหนด Protocal เพื่อเอาไว้ใช้สำหรับการคุยกันไม่ว่าจะเป็น REST หรือ GraphQL หรือ gRPC
+หลังจากที่ได้ศึกษาพื้นฐานภาษา Go รวมถึงการทำ CRUD กับ Database แบบ SQL มาแล้ว ในบทความนี้จะเอาความทั้งหมดมาสร้าง API Service กัน
 
-ในบทความนี้จะสร้าง Todo List API โดยใช้ REST เอาไว้เป็นตัวกลางระหว่าง web ui ที่มีการรับ-ส่งข้อมูล กันแบบ JSON เพื่อส่งไปบันทึก, ค้นหา, อัพเดท และลบข้อมูลในฐานข้อมูล PostgreSQL จนไปถึงการเตรียมความพร้อมก่อนการ deploy และการสร้าง docker image เพื่อใช้ deploy บน production
+โดย API นั้นจะใช้เป็นเป็นตัวกลางระหว่าง Application 2 ตัว หรือระหว่าง UI กับ Database ให้สามารถคุยกันได้ง่ายขึ้น ซึ่งจะต้องมีการกำหนด Protocal เอาไว้ใช้สำหรับสื่อสารกัน ไม่ว่าจะเป็น REST หรือ GraphQL หรือ gRPC ก็ได้
 
-<div className="flex justify-center">
-  <div>![Flow](/static/images/go/golang-api/flow.png)</div>
-</div>
+ในบทความนี้จะสร้าง Todo List API โดยใช้ REST เอาไว้เป็นตัวกลางระหว่าง web ui ที่มีการรับ-ส่งข้อมูล กันแบบ JSON เพื่อส่งไปบันทึก, ค้นหา, อัพเดท และลบข้อมูลในฐานข้อมูล PostgreSQL
 
-เมื่อพิจารณาดูดีๆ ภายใน API ที่จะต้องสร้างขึ้นมาจะแบ่งได้เป็น 3 ส่วน คือ
+<aside>
+💡 จะใช้ Web UI จาก [https://github.com/somprasongd/todo-react-app/tree/5-http-requests](https://github.com/somprasongd/todo-react-app/tree/5-http-requests)
+
+</aside>
+
+ภายใน API ที่จะต้องสร้างขึ้นมาจะแบ่งได้เป็น 3 ส่วน คือ
 
 - Handler ทำหน้าที่ติดต่อกับผู้ใช้ เพื่อรับค่าเข้ามา และส่งผลลัพธ์ตอบกลับไป
 - Bussiness Logic เป็นเงื่อนไขการทำงานของ handler แต่ละตัว
 - Data Access Layer เอาไว้เป็นตัวช่วยในการติดต่อกับฐานข้อมูลจริงๆ
 
-## HTTP Web Server
+<div className="flex justify-center">
+  <div>![Flow](/static/images/go/golang-api/flow.png)</div>
+</div>
+
+สามารถดูโค้ดทั้งหมดได้จาก [repo](https://github.com/somprasongd/blog-golang/tree/main/goapi) นี้
+
+## เริ่มจาก HTTP Web Server
 
 เริ่มจากสร้าง HTTP Web Server ขึ้นมาก่อน โดยใช้ [net/http](https://pkg.go.dev/net/http) ที่เป็น standard library ของ Go ได้เลย
 
@@ -32,12 +42,13 @@ summary: 'จะสอนสร้าง API Service ด้วยภาษา Go
 mkdir -p goapi
 cd goapi
 go mod init goapi
-touch main.go
+mkdir cmd
+touch cmd/main.go
 ```
 
 ### สร้าง HTTP Web Server
 
-```go:main.go
+```go:cmd/main.go
 package main
 
 import (
@@ -51,18 +62,26 @@ func main() {
 }
 ```
 
+### รันโปรแกรม
+
+ใช้คำสั่ง `go run cmd/main.go`
+
 <aside>
-💡 ใน Windows เมื่อสั่ง `go run main.go` จะถูก Windows Security Alert ถามทุกครั้ง แก้โดยการเปลี่ยนจาก `":8080"` เป็น `"localhost:8080"`
+💡 ใน Windows เมื่อสั่ง `go run cmd/main.go` จะถูก Windows Security Alert ถามทุกครั้ง แก้โดยการเปลี่ยนจาก `":8080"` เป็น `"localhost:8080"`
 
 หรือไปสร้าง Inboud Rules ใน Windows Defender Firewall เพื่ออนุญาตให้ใช้ port 8080
 
 </aside>
 
-### Handler Functions and Request Multiplexer (Router)
+## จัดการกับ Request
 
-หลังจากที่เปิดใช้งาน server เมื่อลองเรียกใช้งานจะได้แต่ `404 Not Found` ให้ไปสร้าง Router ที่เป็นทางเข้ามาก่อนโดยใช้ Handler Functions
+เมื่อ server รันขึ้นมาแล้ว แต่พอลองเรียกใช้งานจะแสดงแต่ข้อความ `404 page not found` เนื่องจากเรายังไม่สร้าง router เพื่อจัดการกับ request ที่เรียกเข้ามา
 
-```go:main.go
+### Handler Function
+
+เราจะใช้ Handler Function ในการสร้าง router เช่น เมื่อเรียกเข้ามาที่ `/greet` ให้แสดงข้อความว่า `Hello world` กลับไป
+
+```go:cmd/main.go
 func main() {
   // define route
 	http.HandleFunc("/greet", func(w http.ResponseWriter, r *http.Request) {
@@ -70,17 +89,19 @@ func main() {
   }
 
 	// starting server
-  log.Fatal(http.ListenAndServ(":8000", nil))
+  log.Fatal(http.ListenAndServe(":8080", nil))
 }
+```
 
-// หรือจะเขียน เป็น function แทนก็ได้
+หรือจะเขียน เป็น function แทนก็ได้
 
+```go:cmd/main.go
 func main() {
   // define route
 	http.HandleFunc("/greet", greet)
 
 	// starting server
-  log.Fatal(http.ListenAndServ(":8000", nil))
+  log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func greet(w http.ResponseWriter, r *http.Request) {
@@ -92,7 +113,7 @@ func greet(w http.ResponseWriter, r *http.Request) {
 
 เมื่อต้องตอบกลับข้อมูลที่เรียกเข้ามา ส่งกลับไปในรูปแบบของ JSON โดยนำจะข้อมูลที่เป็น struct มาส่งกลับไปผ่าน `json.NewEncoder.(w).Encode(struct)`
 
-```go:main.go
+```go:cmd/main.go
 package main
 
 import (
@@ -107,27 +128,27 @@ type Test struct {
 
 func main() {
 	// define route
-	http.HandleFunc("/tests", Test)
+	http.HandleFunc("/tests", handleTest)
 
 	// starting server
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func Test(w http.ResponseWriter, r *http.Request) {
+func handleTest(w http.ResponseWriter, r *http.Request) {
 	tests := []Test{
 		{Name: "Test 1"},
 		{Name: "Test 2"},
-    {Name: "Test 3"},
+		{Name: "Test 3"},
 	}
 
-	json.NewEncoder(w).Encode(todos)
+	json.NewEncoder(w).Encode(tests)
 }
 ```
 
 แต่ข้อมูลที่ส่งกลับไปนั่นจะเป็น `text/plain` ซึ่งไม่ถูกต้อง เพราะยังไม่ได้ระบุ `"Content-Type"` ใน Response Header ตอบกลับไปด้วย สามารถเพิ่มได้โดยใช้ `w.Header().Add("header", "data")`
 
-```go:main.go
-func Test(w http.ResponseWriter, r *http.Request) {
+```go:cmd/main.go
+func handleTest(w http.ResponseWriter, r *http.Request) {
 	tests := []Test{
 		{Name: "Test 1"},
 		{Name: "Test 2"},
@@ -135,14 +156,14 @@ func Test(w http.ResponseWriter, r *http.Request) {
 	}
 
   w.Header().Add("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(todos)
+	json.NewEncoder(w).Encode(tests)
 }
 ```
 
 ถ้าต้องการอ่านข้อมูลจาก Request header ให้ใช้ `r.Header.Get("header")`
 
-```go:main.go
-func Test(w http.ResponseWriter, r *http.Request) {
+```go:cmd/main.go
+func handleTest(w http.ResponseWriter, r *http.Request) {
 	tests := []Test{
 		{Name: "Test 1"},
 		{Name: "Test 2"},
@@ -159,32 +180,32 @@ func Test(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-## Routing with gorialla/mux
+## จัดการ Routing ด้วย gorialla/mux
 
 http handler ใน go นั้น สามารถสร้างเป็น mux แทนได้แบบนี้
 
-```go:main.go
+```go:cmd/main.go
 func main() {
   mux := http.NewServeMux()
-  // define route
-	mux.HandleFunc("/tests", Test)
+	// define route
+	mux.HandleFunc("/tests", handleTest)
 
 	// starting server
-  log.Fatal(http.ListenAndServ(":8080", mux))
+	log.Fatal(http.ListenAndServe(":8080", mux))
 }
 ```
 
-แต่ต้องบอกว่า [net/http](https://pkg.go.dev/net/http) ใน Go นั้น จัดการเรื่อง routing ได้ไม่ดี แนะนำให้หา package อื่นมาช่วยจัดการเรื่องนี้แทน โดยในตัออย่างนี้จะใช้ [gorilla/mux](https://github.com/gorilla/mux)
+แต่ต้องบอกว่า [net/http](https://pkg.go.dev/net/http) ใน Go นั้น จัดการเรื่อง routing ได้ไม่ดี แนะนำให้หา package อื่นมาช่วยจัดการเรื่องนี้แทน โดยในตัวอย่างนี้จะใช้ [gorilla/mux](https://github.com/gorilla/mux)
 
 ### ติดตั้ง [gorilla/mux](https://github.com/gorilla/mux)
 
 ```bash
-go get -u github.com/gorilla/mux
+go get -u [github.com/gorilla/mux](http://github.com/gorilla/mux)
 ```
 
 ### เปลี่ยนมาใช้งาน [gorilla/mux](https://github.com/gorilla/mux)
 
-```go:main.go
+```go:cmd/main.go
 import (
   "log"
   "net/http"
@@ -195,10 +216,10 @@ func main() {
   // เปลี่ยนตรงนี้
   r := mux.NewRouter()
   // define route
-	mux.HandleFunc("/tests", Test)
+	r.HandleFunc("/tests", handleTest)
 
 	// starting server
-  log.Fatal(http.ListenAndServ(":8000", r))
+  log.Fatal(http.ListenAndServe(":8080", r))
 }
 ```
 
@@ -206,8 +227,8 @@ func main() {
 
 อ่านค่าออกมาโดยใช้ `r.URL.Query()` ซึ่งค่าของแต่ละ `key` จะได้ออกมาเป็น `[]string`
 
-```go:main.go
-func Test(w http.ResponseWriter, r *http.Request) {
+```go:cmd/main.go
+func handleTest(w http.ResponseWriter, r *http.Request) {
 	query := r.URL.Query()
 	w.Header().Add("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(query)
@@ -233,7 +254,7 @@ func Test(w http.ResponseWriter, r *http.Request) {
 
 กำหนด path แบบนี้ `"/todos/{id}"` และอ่านค่าออกมาใช้ `mux.Vars(r)` ซึ่งค่าของแต่ละ `key` จะได้ออกมาเป็น `string`
 
-```go:main.go
+```go:cmd/main.go
 func main() {
 	// เปลี่ยนตรงนี้
 	r := mux.NewRouter()
@@ -257,7 +278,7 @@ func main() {
 
 การจัดการ method แค่เพิ่ม `.Methods(http.MethodGet)` ไปหลัง `HandleFunc()` จะทำให้ HandleFunc นั้นทำงานเฉพาะ Method ที่ระบุเท่านั้น ตัวอย่างเช่น
 
-```go:main.go
+```go:cmd/main.go
 package main
 
 import (
@@ -284,7 +305,7 @@ func main() {
 }
 ```
 
-## Todo List API
+## สร้าง Todo List API
 
 Todo List API ที่จะสร้าง ออกแบบให้มีฟีเจอร์ตามนี้
 
@@ -297,44 +318,44 @@ Todo List API ที่จะสร้าง ออกแบบให้มี�
 เริ่มทำจาก handlers ซึ่งโค้ดในส่วนนี้จะแยกไว้ใน module handlers
 
 ```bash
-mkdir handlers
-cd handlers
+mkdir -p pkg/handlers
+cd pkg/handlers
 touch todo.go
 ```
 
-### Todo struct
+### เริ่มจาก Todo struct
 
 เนื่องจาก API ที่กำลังจะสร้างจะมีการรับ-ส่งข้อมูลในรูปแบบของ JSON ดังนั้นจะต้องสร้าง struct ขึ้นมาเพื่อไว้เป็นตัวแทนของข้อมูล JSON
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 package handlers
 
 type Todo struct {
-	ID        uint   `json:"id"`
-	Title     string `json:"text"`
+	ID        int    `json:"id"`
+	Text      string `json:"text"`
 	Completed bool   `json:"isCompleted"`
 }
 ```
 
 <aside>
-💡 ในตัวอย่างนี้กำหนดให้ field ใน JSON จะมีชื่อเป็น `text`, `isCompleted` แต่ใน struct จะมีชื่อเป็น `Title`, `Completed` ตามลำดับ
+💡 เนื่องจาก UI จากส่งข้อมูล JSON มาเป็น id, text และ isCompleted แต่ใน struct ที่ของเราจะใช้ชื่อไม่ตรงกัน ดังนั้นต้องใส่ `tag json` เอาไว้
 
 </aside>
 
-### Handlers
+### สร้าง Handlers
 
 สร้าง handlers สำหรับจัดการ routes ทั้งหมด
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func CreateTodo(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, "Create Todo")
 }
 
 func ListTodo(w http.ResponseWriter, r *http.Request) {
   todos := []Todo{
-		{ID: 1, Title: "Test 1", Completed: true},
-		{ID: 2, Title: "Test 2", Completed: false},
-		{ID: 3, Title: "Test 3", Completed: false},
+		{ID: 1, Text: "Test 1", Completed: true},
+		{ID: 2, Text: "Test 2", Completed: false},
+		{ID: 3, Text: "Test 3", Completed: false},
 	}
   // ส่งข้อมูลทั้งหมดกลับไปในรูปแบบ JSON
 	w.Header().Add("Content-Type", "application/json")
@@ -361,16 +382,20 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 
 จะสร้างเป็นฟังก์ชันชื่อ setupRouter() ขึ้นมา เพื่อจัดการ routes ทั้งหมด ที่ `main.go`
 
-```go:main.go
+```go:cmd/main.go
 package main
 
 import (
-	"goapi/handlers"
+	"goapi/pkg/handlers"
 	"log"
 	"net/http"
 
 	"github.com/gorilla/mux"
 )
+
+type Test struct {
+	Name string
+}
 
 func main() {
 	// เปลี่ยนตรงนี้
@@ -387,39 +412,39 @@ func setupRouter(r *mux.Router) {
 	r.HandleFunc("/api/todos", handlers.ListTodo).Methods(http.MethodGet)
 	// สามารถใช้ร่วมกับ regx ได้
 	r.HandleFunc("/api/todos/{id:[0-9]+}", handlers.GetTodo).Methods(http.MethodGet)
-	r.HandleFunc("/api/todos/{id:[0-9]+}", handlers.UpdateTodo).Methods(http.MethodPut)
+	r.HandleFunc("/api/todos/{id:[0-9]+}", handlers.UpdateTodoStatus).Methods(http.MethodPut)
 	r.HandleFunc("/api/todos/{id:[0-9]+}", handlers.DeleteTodo).Methods(http.MethodDelete)
 }
 ```
 
-หรือจะทำเป็นกลุ่มของ `/todos` โดยสร้างเป็น subrouter ขึ้นมาก็ได้
+แต่สร้างเป็น subrouter แทนดีกว่า เพื่อใช้จัดกลุ่มของ `/todos`
 
-```go:main.go
+```go:cmd/main.go
 func setupRouter(r *mux.Router) {
 	todo := r.PathPrefix("/api/todos").Subrouter()
 	todo.HandleFunc("", handlers.CreateTodo).Methods(http.MethodPost)
 	todo.HandleFunc("", handlers.ListTodo).Methods(http.MethodGet)
 	// สามารถใช้ร่วมกับ regx ได้
 	todo.HandleFunc("/{id:[0-9]+}", handlers.GetTodo).Methods(http.MethodGet)
-	todo.HandleFunc("/{id:[0-9]+}", handlers.UpdateTodo).Methods(http.MethodPut)
+	todo.HandleFunc("/{id:[0-9]+}", handlers.UpdateTodoStatus).Methods(http.MethodPut)
 	todo.HandleFunc("/{id:[0-9]+}", handlers.DeleteTodo).Methods(http.MethodDelete)
 }
 ```
 
 ## เชื่อมต่อ Database
 
-จากบทความก่อนหน้านี้ การเชื่อมต่อ Database สามารถใช้ได้ทั้ง standard library หรือ sqlx หรือ gorm ก็ได้ซึ่งในบทความนี้จะเลือกใช้ gorm และฐานข้อมูลเป็น PostgreSQL
+ก่อนจะไปลง logic เรามาเชื่อมต่อ Database รอไว้ก่อน ซึ่งจากบทความก่อนหน้านี้ การเชื่อมต่อ Database สามารถใช้ได้ทั้ง [standard library](https://somprasongd.work/blog/go/golang-db-part1) หรือ [sqlx](https://somprasongd.work/blog/go/golang-db-part2) หรือ [gorm](https://somprasongd.work/blog/go/golang-db-part3) ก็ได้ซึ่งในบทความนี้จะเลือกใช้ [gorm](https://github.com/go-gorm/gorm) และฐานข้อมูลเป็น PostgreSQL
 
-- ติดตั้ง ‣ และ database driver
+- ติดตั้ง [gorm](https://github.com/go-gorm/gorm) และ database driver
 
 ```bash
 go get -u gorm.io/gorm
 go get -u gorm.io/driver/postgres
 ```
 
-- เชื่อมต่อ Database โดยสร้างไฟล์ `database/database.go`
+- เชื่อมต่อ Database โดยสร้างไฟล์ `pkg/common/database/gorm.go`
 
-```go:database/database.go
+```go:pkg/common/database/gorm.go
 package database
 
 import (
@@ -455,7 +480,7 @@ func ConnectDB() {
 
 - เรียกใช้งาน
 
-```go:main.go
+```go:cmd/main.go
 func main() {
   // เรียกก่อนเริ่มเปิด server เพราะถ้าเชื่อมต่อไม่ได้ให้จะได้ไม่ต้อง start server
 	database.ConnectDB()
@@ -474,17 +499,17 @@ func main() {
 
 เนื่องจาก GORM เป็น ORM ดังนั้นเราจะต้องสร้าง Model ซึ่งเป็น `struct` ที่มีโครงสร้างเหมือนกับตารางในฐานข้อมูลขึ้นมาก่อน
 
-ให้ไปแก้ไข `Todo` struct ใน `handlers/todo.go` เนื่องจากชื่อ column สถานะ คือ is_done โดยใช้ gorm tag `column`
+ให้ไปแก้ไข `Todo` struct ใน `pkg/handlers/todo.go` เนื่องจากชื่อ column ใน databse ไม่ตรงกัน โดยจะต้องกำหนด gorm tag `column` ลงไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 type Todo struct {
-	ID        uint   `json:"id"`
-	Title     string `json:"text"`
-	Completed bool   `json:"completed" gorm:"column:is_done"`
+	ID        int    `json:"id"`
+	Text      string `json:"text" gorm:"column:title"`
+	Completed bool   `json:"isCompleted" gorm:"column:is_done"`
 }
 ```
 
-## Bussiness Logic
+## ใส่ Bussiness Logic
 
 ถัดมาจะรวมทุกอย่างเข้าด้วยกัน โดยการใส่ bussiness logic ที่ handlers แต่ละตัว ให้รับข้อมูลมา แล้วส่งต่อไปยังฐานข้อมูล แล้วตอบผลลัพธ์กลับไป
 
@@ -494,7 +519,7 @@ type Todo struct {
 
 - Step 1: รับข้อมูลที่เป็น JSON `{"text", "do something"}` เข้ามาแล้วแปลงเป็น Todo struct ถ้าแปลงไม่ได้ให้ตอบ error 400 กลับไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func CreateTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: แปลง JSON จาก request body เป็น Todo struct
 	var todo Todo
@@ -510,7 +535,7 @@ func CreateTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 2: ตรวจสอบว่าข้อมูลที่ส่งมาต้องไม่เป็นค่าว่าง ถ้าเป็นค่าว่างให้ตอบ error 400 กลับไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func CreateTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: แปลง JSON จาก request body เป็น Todo struct
 	// step 2: validate
@@ -523,30 +548,80 @@ func CreateTodo(w http.ResponseWriter, r *http.Request) {
 
 แต่ถ้าต้องมีการตรวจสอบหลายๆ fields แนะนำให้ใช้ package [validator](https://github.com/go-playground/validator) แทน โดยการ tag `validate` ลงไปใน struct
 
-ติดตั้งก่อน `go get github.com/go-playground/validator/v10`
+เพื่อความสะดวกต่อการใช้งานจะสร้างเป็น validator ของเราเองขึ้นมาครอบ package [validator](https://github.com/go-playground/validator) ไว้
 
-```go:handlers/todo.go
-type Todo struct {
-	ID        uint   `json:"id"`
-	Title     string `json:"text" validate:"required"`
-	Completed bool   `json:"completed" gorm:"column:is_done"`
+```go:pkg/common/validator/validator.go
+package validator
+
+import (
+	"errors"
+	"strings"
+
+	"github.com/go-playground/locales/en"
+	ut "github.com/go-playground/universal-translator"
+	"github.com/go-playground/validator/v10"
+	en_translations "github.com/go-playground/validator/v10/translations/en"
+)
+
+// use a single instance , it caches struct info
+var (
+	uni      *ut.UniversalTranslator
+	validate *validator.Validate
+	trans    ut.Translator
+)
+
+func init() {
+	en := en.New()
+	uni = ut.New(en, en)
+	// this is usually know or extracted from http 'Accept-Language' header
+	// also see uni.FindTranslator(...)
+	trans, _ = uni.GetTranslator("en")
+	validate = validator.New()
+	en_translations.RegisterDefaultTranslations(validate, trans)
 }
 
-// use a single instance of Validate, it caches struct info
-var validate *validator.Validate = validator.New()
+func ValidateStruct(s interface{}) error {
+	err := validate.Struct(s)
+	if err != nil {
+		return errors.New(errToMessage(err))
+	}
+	return nil
+}
+
+func errToMessage(err error) (message string) {
+	// translate all error at once
+	errs := err.(validator.ValidationErrors)
+	fields := removeTopStruct(errs.Translate(trans))
+	for k, v := range fields {
+		message += ", " + k + ": " + v
+	}
+	return message[2:]
+}
+
+func removeTopStruct(fields map[string]string) map[string]string {
+	res := map[string]string{}
+	for field, err := range fields {
+		res[strings.ToUpper(strings.ReplaceAll(field[strings.Index(field, ".")+1:], ".", "_"))] = err
+	}
+	return res
+}
+```
+
+เสร็จแล้วรัน `go mod tidy` เพื่อดาวน์โหลด package ที่ต้องใช้งาน
+
+```go:pkg/handlers/todo.go
+type Todo struct {
+	ID        int    `json:"id"`
+	Text      string `json:"text" gorm:"column:title" validate:"required" `
+	Completed bool   `json:"isCompleted" gorm:"column:is_done"`
+}
 
 func CreateTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: แปลง JSON จาก request body เป็น Todo struct
 	// step 2: validate
-  // returns nil or ValidationErrors ( []FieldError )
-	err = validate.Struct(todo)
+  err = validator.ValidateStruct(todo)
 	if err != nil {
-		errMsg := ""
-
-		for _, err := range err.(validator.ValidationErrors) {
-			errMsg += err.Error() + "\n"
-		}
-		http.Error(w, errMsg, http.StatusBadRequest)
+		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 }
@@ -554,7 +629,7 @@ func CreateTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 3: บันทึกข้อมูลลงฐานข้อมูล ถ้าเกิดข้อผิดพลาดให้ตอบ error 500 กลับไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func CreateTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: แปลง JSON จาก request body เป็น Todo struct
 	// step 2: validate
@@ -569,7 +644,7 @@ func CreateTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 4: สุดท้ายให้ตอบข้อมูลที่บันทึกส่งกลับไปในรูปแบบของ JSON และสถานะเป็น 201
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func CreateTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: แปลง JSON จาก request body เป็น Todo struct
 	// step 2: validate
@@ -592,7 +667,7 @@ func CreateTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 1: ค้นหาข้อมูลทั้งหมดจากฐานข้อมูล ถ้าเกิดข้อผิดพลาดให้ตอบ error 500 กลับไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func ListTodo(w http.ResponseWriter, r *http.Request) {
   // step 1: query all todos from database
 	todos := []Todo{}
@@ -608,7 +683,7 @@ func ListTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 2: ส่งข้อมูลทั้งหมดกลับไปในรูปแบบ JSON
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func ListTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: query all todos from database
   // step 2: response
@@ -619,7 +694,7 @@ func ListTodo(w http.ResponseWriter, r *http.Request) {
 
 หรือจะเพิ่มให้สามารถค้นหาจากสถานะที่ส่งมาทาง query parameters ด้วยก็ได้ ตามนี้
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func ListTodo(w http.ResponseWriter, r *http.Request) {
   // เพิ่มอ่านค่าจาก query params
   query := r.URL.Query()
@@ -654,7 +729,7 @@ func ListTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 1: อ่านค่า id ออกมา แล้วแปลงเป็นตัวเลข
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func GetTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   vars := mux.Vars(r)
@@ -669,7 +744,7 @@ func GetTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 2: นำค่า id ไปค้นหาจากฐานข้อมูล ถ้าเกิดข้อผิดพลาดให้ตอบ error 500 กลับไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func GetTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   // step 2: select where id
@@ -684,7 +759,7 @@ func GetTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 3: ถ้าไม่พบข้อมูลให้ตอบ error 404 กลับไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func GetTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   // step 2: select where id
@@ -704,7 +779,7 @@ func GetTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 4: ถ้าพบข้อมูลให้ส่งกลับไปในรูปแบบ JSON
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func GetTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   // step 2: select where id
@@ -721,7 +796,7 @@ func GetTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 1: อ่านค่า id ออกมา แล้วแปลงเป็นตัวเลข
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   vars := mux.Vars(r)
@@ -731,7 +806,7 @@ func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 2: รับข้อมูลที่เป็น JSON `{"isCompleted", true}` เข้ามาแล้วแปลงเป็น Todo struct
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   // step 2: แปลง json body เป็น struct เพื่อเอาค่าสถานะที่ส่งมา
@@ -746,12 +821,12 @@ func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 3: นำข้อมูลที่ส่งมาไปอัพเดทสถานะในฐานข้อมูลจาก id ที่ระบุมา
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   // step 2: แปลง json body เป็น struct เพื่อเอาค่าสถานะที่ส่งมา
   // step 3: update only is_done column
-  tx := database.DB.Model(Todo{ID: uint(id)}).Update("is_done", todo.Completed)
+  tx := database.DB.Model(Todo{ID: id}).Update("is_done", todo.Completed)
 	if err := tx.Error; err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -761,7 +836,7 @@ func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 4: กรณีที่ไม่มี id ที่ส่งมา ให้ตอบ error 404 กลับไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   // step 2: แปลง json body เป็น struct เพื่อเอาค่าสถานะที่ส่งมา
@@ -776,7 +851,7 @@ func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 5: ถ้าอัพเดทสำเร็จให้ตอบแค่สถานะ 204 กลับไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   // step 2: แปลง json body เป็น struct เพื่อเอาค่าสถานะที่ส่งมา
@@ -793,7 +868,7 @@ func UpdateTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 1: อ่านค่า id ออกมา แล้วแปลงเป็นตัวเลข
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   vars := mux.Vars(r)
@@ -803,7 +878,7 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 2: นำค่า id ที่ส่งมาไปลบออกจากฐานข้อมูล
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   // step 2: delete where id
@@ -817,7 +892,7 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 3: กรณีที่ไม่มี id ที่ส่งมา ให้ตอบ error 404 กลับไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   // step 2: delete where id
@@ -831,7 +906,7 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 
 - Step 4: ถ้าลบสำเร็จให้ตอบแค่สถานะ 204 กลับไป
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 	// step 1: get id from path param
   // step 2: delete where id
@@ -841,16 +916,37 @@ func DeleteTodo(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
+### Refactor
+
+จากโค้ดด้านบนจะเห็นว่า ขั้นตอนการตอบกลับ JSON จะมีส่วนที่ทำงานซ้ำๆ กัน คือ กำหนด Content-Type, กำหนด respone code และแปลง struct เป็น JSON แล้วตอบกลับไป ดังนี้ สามารถเอาโค้ดส่วนนี้แยกมาเป็นฟังก์ชันสำหร้บส่งข้อมูลตอบกลับได้ตามนี้
+
+```go:pkg/handlers/todo.go
+func sendJson(w http.ResponseWriter, code int, data interface{}) {
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(data)
+}
+```
+
+เมื่อเรียกใช้งานโค้ดจะดู clean ขึ้น
+
+```go:pkg/handlers/todo.go
+func GetTodo(w http.ResponseWriter, r *http.Request) {
+	// ...
+	// step 4: response
+	sendJson(w, http.StatusOK, todo)
+}
+```
+
 ### Use Method Style
 
 ส่วนตัวชอบเขียน handler ในรูปแบบของ method มากกว่า function โดยจะส่ง depencies ที่ต้องใช้ทั้งหมดมาให้ตอนสร้าง handler ขึ้นมาแทน
 
 - สร้าง todoHandler struct พร้อมกำหนด depencies ที่ต้องการใช้งาน
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 type todoHandler struct {
 	db       *gorm.DB
-	validate *validator.Validate
 }
 
 func NewTodoHandler(db *gorm.DB, validate *validator.Validate) *todoHandler {
@@ -863,10 +959,8 @@ func NewTodoHandler(db *gorm.DB, validate *validator.Validate) *todoHandler {
 
 - แก้ handlers function เป็น method โดยการทำเป็น receiver function
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func (h todoHandler) CreateTodo(w http.ResponseWriter, r *http.Request) {
-  // ...
-	err = h.validate.Struct(todo)
   // ...
 	tx := h.db.Create(&todo)
   // ...
@@ -897,22 +991,16 @@ func (h todoHandler) DeleteTodo(w http.ResponseWriter, r *http.Request) {
 }
 ```
 
-- แก้ไขการเรียกใช้ที่ `main.go`
+- แก้ไขการเรียกใช้ที่ `cmd/main.go`
 
-```go:main.go
-// use a single instance of Validate, it caches struct info
-var validate *validator.Validate
-
+```go:cmd/main.go
 func main() {
-	database.ConnectDB()
-
-	validate = validator.New()
   // ...
 }
 
 func setupRouter(r *mux.Router) {
 	todo := r.PathPrefix("/api/todos").Subrouter()
-	todoHandler := handlers.NewTodoHandler(database.DB, validate)
+	todoHandler := handlers.NewTodoHandler(database.DB)
 	todo.HandleFunc("", todoHandler.CreateTodo).Methods(http.MethodPost)
 	todo.HandleFunc("", todoHandler.ListTodo).Methods(http.MethodGet)
 	// สามารถใช้ร่วมกับ regx ได้
@@ -924,102 +1012,84 @@ func setupRouter(r *mux.Router) {
 
 ## Error Handling
 
-ในกรณีที่เกิดข้อผิดพลาด ตอนนี้จะตอบกลับไปเป็นข้อความ แต่เนื่องจาก API Service นี้ ต้องการให้ตอบกลับในรูปแบบของ JSON เท่านั้น ดังนั้นเริ่มจากไปสร้าง `AppError` struct ขึ้นมาก่อนที่ `errs/errs.go`
+ในกรณีที่เกิดข้อผิดพลาด ตอนนี้จะตอบกลับไปเป็นข้อความ แต่เนื่องจาก API Service นี้ ต้องการให้ตอบกลับในรูปแบบของ JSON เท่านั้น
 
-```go:errs/errs.go
+- เพื่อความสะดวกในการเขียนโค้ด ให้เราสร้าง `AppError` ซึ่งเป็น error ที่มี status code ขึ้นมาก่อนที่ `pkg/common/errs/errs.go`
+
+```go:pkg/common/errs/errs.go
 package errs
 
 import "net/http"
 
 type AppError struct {
-	Code    int    `json:"-"`  // ไม่ต้องการให้แสดง code
-	Message string `json:"message"`
+	Code    int    `json:"-"`
+	Message string `json:"error"`
 }
 
-func NewBadRequestError(message string) *AppError {
-	return &AppError{
+func (e AppError) Error() string {
+	return e.Message
+}
+
+func NewBadRequestError(message string) error {
+	return AppError{
 		Code:    http.StatusBadRequest,
 		Message: message,
 	}
 }
 
-func NewNotFoundError(message string) *AppError {
-	return &AppError{
+func NewNotFoundError(message string) error {
+	return AppError{
 		Code:    http.StatusNotFound,
 		Message: message,
 	}
 }
 
-func NewUnexpectedError(message string) *AppError {
-	return &AppError{
+func NewUnexpectedError(message string) error {
+	return AppError{
 		Code:    http.StatusInternalServerError,
 		Message: message,
 	}
 }
 ```
 
-### นำไปใช้งาน
+- สร้างฟังก์ชันจัดการ error ใน `pkg/handlers/todo.go`
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
+func handleError(w http.ResponseWriter, err error) {
+	switch e := err.(type) {
+	case errs.AppError:
+		sendJson(w, e.Code, e)
+	case error:
+		appErr := errs.AppError{
+			Code:    http.StatusInternalServerError,
+			Message: e.Error(),
+		}
+		sendJson(w, appErr.Code, appErr)
+	}
+}
+```
+
+- จัดการ error ด้วย AppError
+
+```go:pkg/handlers/todo.go
 func (h todoHandler) GetTodo(w http.ResponseWriter, r *http.Request) {
+	// step 1: get id from path param
 	vars := mux.Vars(r)
-
 	id, _ := strconv.Atoi(vars["id"])
-
+	// step 2: select where id
 	todo := Todo{}
-
 	tx := h.db.First(&todo, id)
 	if err := tx.Error; err != nil {
-		appErr := errs.NewUnexpectedError(err.Error())
+		// step 3: handle error not found
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			appErr = errs.NewNotFoundError("todo with given id not found")
+			handleError(w, errs.NewNotFoundError("todo with given id not found"))
+			return
 		}
-
-		w.Header().Add("Content-Type", "application/json")
-		w.WriteHeader(appErr.Code)
-		json.NewEncoder(w).Encode(appErr)
+		handleError(w, errs.NewUnexpectedError(err.Error()))
 		return
 	}
-
-	w.Header().Add("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(todo)
-}
-```
-
-### Refactor
-
-จากโค้ดด้านบนจะเห็นว่า ขั้นตอนการตอบกลับ JSON จะมีส่วนที่ทำงานซ้ำๆ กัน คือ กำหนด Content-Type, กำหนด respone code และแปลง struct เป็น JSON แล้วตอบกลับไป ดังนี้ สามารถเอาโค้ดส่วนนี้แยกมาเป็นฟังก์ชันสำหร้บส่งข้อมูลตอบกลับได้ตามนี้
-
-```go:handlers/todo.go
-func writeResponse(w http.ResponseWriter, code int, data interface{}) {
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(data)
-}
-```
-
-เมื่อเรียกใช้งานโค้ดจะดู clean ขึ้น
-
-```go
-func GetTodo(w http.ResponseWriter, r *http.Request) {
-	vars := mux.Vars(r)
-
-	id, _ := strconv.Atoi(vars["id"])
-
-	todo := Todo{}
-
-	tx := database.DB.First(&todo, id)
-	if err := tx.Error; err != nil {
-		appErr := errs.NewUnexpectedError(err.Error())
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			appErr = errs.NewNotFoundError("todo with given id not found")
-		}
-
-		writeResponse(w, appErr.Code, appErr)
-		return
-	}
-
-	writeResponse(w, http.StatusOK, todo)
+	// step 4: response
+	sendJson(w, http.StatusOK, todo)
 }
 ```
 
@@ -1031,7 +1101,7 @@ Middleware คือ function ที่รับ handler และคืน hand
 
 - ตัวอย่างการทำ Access log
 
-```go:middleware/middleware.go
+```go:pkg/middleware/middleware.go
 package middleware
 
 import (
@@ -1051,7 +1121,7 @@ func Logging(next http.Handler) http.Handler {
 
 - ตัวอย่างทำ Authentication
 
-```go:middleware/middleware.go
+```go:pkg/middleware/middleware.go
 type authenticationMiddleware struct {
 	tokenUsers map[string]string
 }
@@ -1086,7 +1156,7 @@ func (amw *authenticationMiddleware) Middleware(next http.Handler) http.Handler 
 
 - การเรียกใช้
 
-```go:main.go
+```go:cmd/main.go
 func setupRouter(r *mux.Router) {
 	todo := r.PathPrefix("/api/todos").Subrouter()
   todoHandler := handlers.NewTodoHandler(database.DB, validate)
@@ -1108,7 +1178,7 @@ func setupRouter(r *mux.Router) {
 
 - หรือถ้าต้องการ authen เฉพาะ `/api/todos`
 
-```go:main.go
+```go:cmd/main.go
 func setupRouter(r *mux.Router) {
 	todo := r.PathPrefix("/api/todos").Subrouter()
 	todo.HandleFunc("", handlers.CreateTodo).Methods(http.MethodPost)
@@ -1143,30 +1213,37 @@ func setupRouter(r *mux.Router) {
 
 จะพบว่าไม่สามารถเรียกใช้งานอะไรได้เลย เนื่องจากมี error `“strict-origin-when-cross-origin”` ซึ่งสามารถแก้ไขได้โดยการใช้ package [cors](https://github.com/rs/cors) เข้ามาช่วย ดังนี้
 
-ติดตั้งก่อน `go get github.com/rs/cors`
+<aside>
+💡 ติดตั้งก่อน `go get github.com/rs/cors`
 
-```go:main.go
+</aside>
+
+```go:cmd/main.go
 func main() {
-	database.ConnectDB()
+	// ...
+	// รับ handler กลับมา
+	handler := setupRouter(r)
 
-	// เปลี่ยนตรงนี้
-	r := mux.NewRouter()
-	// define route
-	setupRouter(r)
+	// starting server
+	log.Fatal(http.ListenAndServe(":8080", handler))
+}
 
-  // Handling CORS Requests
+// เพิ่ม return http.Handler
+func setupRouter(r *mux.Router) http.Handler {
+	// ...
+
+	r.Use(middleware.Logging)
+
+	// Handling CORS Requests
 	c := cors.New(cors.Options{
 		AllowCredentials: true,
 		AllowedMethods:   []string{"GET", "POST", "PATCH", "DELETE", "OPTIONS"},
 	})
 
 	handler := c.Handler(r)
-	// starting server
-	log.Fatal(http.ListenAndServe(":8080", handler))
+	return handler
 }
 ```
-
-เรียบร้อย... ตอนนี้สามารถเรียกใช้ API จากหน้าเว็บได้แล้ว
 
 ## Non Functional Requirements
 
@@ -1178,10 +1255,10 @@ func main() {
 
 ซึ่งในภาษา Go สามารถอ่านค่า environment ได้จาก `os.Getenv("APP_PORT")`
 
-```go:main.go
-  // starting server
+```go:cmd/main.go
+// starting server
 	port := os.Getenv("APP_PORT")
-	log.Println(fmt.Sprintf("Starting server at port %v", port))
+	log.Printf("Starting server at port %v\n", port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), handler))
 ```
 
@@ -1212,9 +1289,9 @@ db:
   database: 'fcricryh'
 ```
 
-- โหลดไฟล์ config โดยเพิ่มไฟล์ `config/config.go`
+- โหลดไฟล์ config โดยเพิ่มไฟล์ `common/config/config.go`
 
-```go:config/config.go
+```go:pkg/common/config/config.go
 package config
 
 import (
@@ -1238,21 +1315,21 @@ func LoadConfig() {
 
 - การเรียกใช้งาน ใช้ `viper.GetXXX("ชื่อใช้ . dot notation")`
 
-```go:main.go
+```go:cmd/main.go
 func main() {
 	config.LoadConfig()
 	database.ConnectDB()
   // ...
 	// starting server
 	port := viper.GetInt("app.port")
-	logger.Info(fmt.Sprintf("Starting server at port %v", port))
+	log.Printf("Starting server at port %v\n", port)
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), handler))
 }
 ```
 
 - แต่เนื่องจากเมื่อนำไป deploy ใช้งานจริง ใส่ค่า environment มาในรูปแบบ APP_PORT ดังนั้นต้องเพิ่ม config ให้แปลงค่า environment ให้ด้วย และต้องไม่ `panic` ถ้าไม่ใช้ไฟล์ config
 
-```go:config/config.go
+```go:pkg/common/config/config.go
 func init() {
 	viper.SetConfigName("config")                          // กำหนดชื่อไฟล์ config (without extension)
 	viper.SetConfigType("yaml")                            // ระบุประเภทของไฟล์ config
@@ -1271,7 +1348,7 @@ func init() {
 
 - เพิ่มกำหนดค่า default เช่น ถ้าไม่ได้ระบุ app.port มา ให้ default เป็น 8080
 
-```go:config/config.go
+```go:pkg/common/config/config.go
 func LoadConfig() {
 	viper.SetConfigName("config")                          // กำหนดชื่อไฟล์ config (without extension)
 	viper.SetConfigType("yaml")                            // ระบุประเภทของไฟล์ config
@@ -1291,7 +1368,7 @@ func LoadConfig() {
 
 - สามารถสร้าง struct ขึ้นมารับค่า config เพื่อให้สะดวกต่อการใช้งานได้
 
-```go:config/config.go
+```go:pkg/common/config/config.go
 package config
 
 import (
@@ -1351,9 +1428,9 @@ func LoadConfig() {
 
 </aside>
 
-- แต่การ Decode config ด้วยการทำ Unmarshling นั้นไม่สามารถใช้ได้กับการอ่านค่า config จากค่า environments ผ่าน `viper.AutomaticEnv()` ดังนั้นเราจะใช้วิธีสร้าง struct `Config` ขึ้นมาเองแทน
+- แต่การ Decode config ด้วยการทำ Unmarshling นั้นไม่สามารถใช้ได้กับการอ่านค่า config จากค่า environments ผ่าน `viper.AutomaticEnv()` ดังนั้นเราจะใช้วิธีสร้าง struct Config ขึ้นมาเองแทน
 
-```go:config/config.go
+```go:pkg/common/config/config.go
 func LoadConfig() {
 	// ...
 
@@ -1382,10 +1459,9 @@ func LoadConfig() {
 
 - สุดท้ายให้เพิ่มการตรวจสอบว่าได้กำหนดค่า config มาครบหรือไม่ โดยใช้ [validator](https://github.com/go-playground/validator)
 
-```go:config/config.go
+```go:pkg/common/config/config.go
 func LoadConfig() {
   // ...
-	// Config := &configuration{...}
 
 	// ตรวจสอบว่ากำหนดค่ามาครบหรือไม่
 	validate := validator.New()
@@ -1397,13 +1473,27 @@ func LoadConfig() {
 }
 ```
 
+- เรียกใช้งาน
+
+```go:cmd/main.go
+func main() {
+	config.LoadConfig()
+	database.ConnectDB()
+  // ...
+	// starting server
+	port := config.Config.App.Port
+	log.Printf("Starting server at port %v\n", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), handler))
+}
+```
+
 ### Rate Limit
 
-ในบางครั้ง api ของเราจะต้องใช้เวลาในการทำงานนาน ไม่ว่าจะเป็นคิวรี่ข้อมูล หรือไปเรียกใช้งาน api ภายนอก เราจะต้องป้องกัน api ของเราด้วยการกำหนดจำนวนสูงในการรับ request ต่อวินาทีเอาไว้ โดยช้ package [golang.org/x/time/rate](http://golang.org/x/time/rate)
+ในบางครั้ง api ของเราจะต้องใช้เวลาในการทำงานนาน ไม่ว่าจะเป็นคิวรี่ข้อมูล หรือไปเรียกใช้งาน api ภายนอก เราจะต้องป้องกัน api ของเราด้วยการกำหนดจำนวนสูงในการรับ request ต่อวินาทีเอาไว้ โดยช้ package **[golang.org/x/time/rate](http://golang.org/x/time/rate)**
 
 **ตัวอย่าง** ถ้าต้องการกำหนดให้รับ 10 req/sec ให้กำหนดแบบนี้ `limiter := rate.Newlimiter(10, 1)` โดย `10` คือจำนวน limit per sec และ `1` คือ ขนาดของ burst size หรือจะกำหนดเป็น `limiter := rate.Newlimiter(5, 5)` ก็ได้
 
-```go:main.go
+```go:cmd/main.go
 package main
 import (
   "fmt"
@@ -1436,7 +1526,7 @@ SIGTERM เช่น สั่งหยุด pod จาก kubernates
 
 </aside>
 
-```go:main.go
+```go:cmd/main.go
 package main
 
 import (
@@ -1509,7 +1599,7 @@ func main() {
 
   1. ให้สร้างไฟล์เมื่อเริ่มโปรแกรม และลบไฟล์ทิ้งเมื่อจบโปรแกรม
 
-     ```go:main.go
+     ```go:cmd/main.go
      func main() {
        _, err := os.Create("/tmp/live")
        if err != nil {
@@ -1538,7 +1628,7 @@ func main() {
 
   1. เพิ่ม `/healthz` และ `return 200 OK` กลับไป
 
-     ```go:main.go
+     ```go:cmd/main.go
      func setupRouter(r *mux.Router) {
        todo.HandleFunc("/healthz", handleHealthz).Methods(http.MethodGet)
 
@@ -1565,7 +1655,7 @@ func main() {
 
 - **Transaction Id** โดยปกติเมื่อสั่งให้แสดง log ออกมา จะไม่ทราบว่า log นั้นๆ เป็นของ transcation อะไร บ้าง วิธีที่ง่ายที่สุด คือ ให้ฝั่งที่เรียกเข้ามาส่งค่า unique id มาให้ด้วยทุกครั้ง และเอาค่าที่ส่งมานั้นมาแสดงใน log ด้วย
 
-```go
+```go:pkg/handlers/todo.go
 if err := tx.Error; err != nil {
 	appErr := errs.NewUnexpectedError(err.Error())
 	if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -1585,7 +1675,7 @@ if err := tx.Error; err != nil {
 
 - **Structured Logging** เวลาสั่ง `log.Println()` จะได้ออกมาเป็นข้อความธรรมดา นำไปใช้งานต่อได้ยาก ไม่สะดวกต่อการค้นหา ซึ่งควรจะแสดง log ออกมาในรูปแบบของ JSON ดีกว่า เช่น
 
-```go
+```bash
 2022/02/01 11:07:10 833d57ef-afb9-45c1-8450-9eff6559043e todo with given id not found
 
 เปลี่ยนเป็น
@@ -1605,7 +1695,7 @@ go get -u go.uber.org/zap
 
 สร้าง logger module
 
-```go:logger/logger.go
+```go:pkg/common/logger/logger.go
 package logger
 
 import (
@@ -1642,7 +1732,8 @@ func Error(message string, fileds ...zap.Field) {
 
 ลองเรียกใช้งาน
 
-```go:main.go
+```go:cmd/main.go
+// main.go
 func main() {
   // ...
   logger.Info("Starting server at port 8080")
@@ -1657,7 +1748,7 @@ func main() {
 
 </aside>
 
-```go:logger/logger.go
+```go:pkg/common/logger/logger.go
 func init() {
 	var err error
 
@@ -1671,7 +1762,7 @@ func init() {
 
 ถ้าต้องการเปลี่ยนชื่อ field เช่น ts เป็น timestamp และปลี่ยน format ใหม่ทำได้ดังนี้
 
-```go:logger/logger.go
+```go:pkg/common/logger/logger.go
 func init() {
 	var err error
 
@@ -1696,11 +1787,9 @@ func init() {
 
 </aside>
 
-ถ้าหาก log ของเราต้องส่งไปยัง Elastic เพื่อให้ได้ format ที่ใช้งานได้เลยนั้น ต้องใช้ร่วมกับ plugin ECS loggers
+ถ้าหาก log ของเราต้องส่งไปยัง Elastic เพื่อให้ได้ format ที่ใช้งานได้เลยนั้น ต้องใช้ร่วมกับ plugin ECS loggers (ต้องติดตั้งก่อน go `get go.elastic.co/ecszap`)
 
-ติดตั้งก่อน `go get go.elastic.co/ecszap`
-
-```go:logger/logger.go
+```go:pkg/common/logger/logger.go
 func init() {
 	var err error
 
@@ -1728,14 +1817,16 @@ func init() {
 เริ่มจากสร้าง Dockerfile เพื่อนำไปสร้าง Docker image
 
 ```docker:Dockerfile
-FROM golang:1.17-buster AS build
+FROM golang:1.18-buster AS build
 WORKDIR /app
 COPY go.mod ./
 COPY go.sum ./
 RUN go mod download
-COPY . ./
+COPY cmd ./cmd
+COPY pkg ./pkg
 ENV GOARCH=amd64
-RUN go build -o /go/bin/app
+RUN ls
+RUN go build -o /go/bin/app cmd/main.go
 
 ## Deploy
 FROM gcr.io/distroless/base-debian11
@@ -1774,6 +1865,9 @@ services:
         max-file: '3'
     healthcheck:
       test: pg_isready -U postgres -h 127.0.0.1
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   api:
     image: todo-api:1.0.0
