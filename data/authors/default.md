@@ -9,3 +9,11 @@ facebook: https://www.facebook.com/somprasongd
 linkedin: https://www.linkedin.com/in/somprasongd
 github: https://github.com/somprasongd
 ---
+
+ประวัติการทำงาน https://www.linkedin.com/in/somprasongd/
+
+## สามารถอ่าน Blog เก่าๆ ได้ที่
+
+- [Medium](https://medium.com/@somprasongd)
+
+- [Dev.to](https://dev.to/somprasongd)
