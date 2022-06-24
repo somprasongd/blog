@@ -1,0 +1,692 @@
+---
+title: 'วิธีการสร้าง function handler ให้ใช้ได้กับทุก web framework'
+date: '2022-06-24'
+lastmod: '2022-06-24'
+tags: ['go', 'api']
+draft: false
+summary: 'วิธีการสร้าง function handler ให้ใช้ได้กับทุก web framework'
+---
+
+# วิธีการสร้าง function handler ให้ใช้ได้กับทุก web framework
+
+โดยปกติเมื่อเราจะสร้าง API ขึ้นมา เช่น REST API เราจะต้องสร้าง HTTP Server ขึ้นมา และมีการระบุว่าเมื่อมี request เข้ามาในแต่ละ path จะมีการจัดการอย่างไรโดยใช้ function handler ซึ่งจะมีวิธีการสร้างขึ้นตาม HTTP Framework ที่เราเลือกใช้งาน
+
+สมมุติว่าเราต้องการเปลี่ยนไปใช้ HTTP Framework ตัวอื่น ก็จะกระทบกับ function handler เดิมของเรา ต้องเข้ามาแก้ไข และทำการทดสอบใหม่อีกรอบ ซึ่งถ้ามีไม่เยอะคงไม่เป็นไร
+
+ดังนั้น ในบทความนี้จะแสดงวิธีที่ทำให้ function handler ของ routes ต่างๆ สามารถเปลี่ยนไปใช้กับ HTTP framework อะไรก็ได้ โดยที่ไม่ต้องมาแก้ function handler โดยจะใช้ภาษา go ในการแสดงตัวอย่าง
+
+## ตัวอย่าง Todo API
+
+เริ่มจากโปรเจคตัวอย่างเป็น Todo API แบบง่ายๆ โดยใช้ http ร่วมกับ [gorilla/mux](https://github.com/gorilla/mux)
+
+```go:cmd/http/main.go
+package main
+
+import (
+	"fmt"
+	"goapi-handlefunc/handler"
+	"net/http"
+
+	"github.com/gorilla/mux"
+)
+
+const (
+	BASE_URL = "/api/v1"
+	PORT     = ":8080"
+)
+
+func main() {
+	r := mux.NewRouter()
+	// use gorilla/mux
+	setRouter(r)
+
+	http.ListenAndServe(PORT, r)
+}
+
+func setRouter(r *mux.Router) {
+	h := handler.HTTPHandler{}
+
+	todos := r.PathPrefix(BASE_URL + "/todos").Subrouter()
+	todos.HandleFunc("", h.CreateHandler).Methods("POST")
+	todos.HandleFunc("", h.ListHandler).Methods("GET")
+	todos.HandleFunc("/{id:[0-9]+}", h.GetHandler).Methods("GET")
+	todos.HandleFunc("/{id:[0-9]+}", h.StatusUpdateHandler).Methods("PATCH")
+	todos.HandleFunc("/{id:[0-9]+}", h.DeleteHandler).Methods("DELETE")
+}
+```
+
+มีใช้ http เราจะต้องสร้าง handler function ที่มีหน้าตาแบบนี้
+
+```go
+func (w http.ResponseWriter, r *http.Request) {
+
+}
+```
+
+ตัวอย่าง handlers ทั้งหมด
+
+```go:handler/todo.go
+package handler
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"strconv"
+
+	"github.com/gorilla/mux"
+)
+
+type Todo struct {
+	ID        int    `json:"id"`
+	Text      string `json:"text"`
+	Completed bool   `json:"completed"`
+}
+
+type TodoHandler struct {
+}
+
+func (h TodoHandler) CreateHandler(w http.ResponseWriter, r *http.Request) {
+	// bind json to new stuct
+	var todo Todo
+	err := json.NewDecoder(r.Body).Decode(&todo)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// validate stuct if error return error reponse with status 400
+	if todo.Text == "" {
+		http.Error(w, "text is required", http.StatusBadRequest)
+		return
+	}
+	// save
+	// return json response with status 201
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(todo)
+}
+
+func (h TodoHandler) ListHandler(w http.ResponseWriter, r *http.Request) {
+	// get query param for filter
+	query := r.URL.Query()
+	term := "Text"
+	if val, ok := query["term"]; ok {
+		term = val[0]
+	}
+	// list by filter
+	todos := []Todo{
+		{ID: 1, Text: term + "1", Completed: true},
+		{ID: 2, Text: term + "2", Completed: false},
+		{ID: 3, Text: term + "3", Completed: false},
+	}
+	// return json response with status 200
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(todos)
+}
+
+func (h TodoHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
+	// get id from path param
+	vars := mux.Vars(r)
+	id, _ := strconv.Atoi(vars["id"])
+	// get by id
+	todo := Todo{
+		ID:        id,
+		Text:      "Get Todo by ID",
+		Completed: false,
+	}
+	// return json notfound error reponse if notfound with status 404
+	// return json response with status 200
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(todo)
+}
+
+func (h TodoHandler) StatusUpdateHandler(w http.ResponseWriter, r *http.Request) {
+	// get id from path param
+	vars := mux.Vars(r)
+	id, _ := strconv.Atoi(vars["id"])
+	// bind json to patch stuct
+	var updateTodo Todo
+	err := json.NewDecoder(r.Body).Decode(&updateTodo)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	// get by id
+	todo := Todo{
+		ID:        id,
+		Text:      "Update Todo Status by ID",
+		Completed: false,
+	}
+	// return json notfound error reponse if notfound with status 404
+	// udpate status
+	todo.Completed = updateTodo.Completed
+	// return json response with status 200
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(todo)
+}
+
+func (h TodoHandler) DeleteHandler(w http.ResponseWriter, r *http.Request) {
+	// get id from path param
+	vars := mux.Vars(r)
+	id, _ := strconv.Atoi(vars["id"])
+	// get by id
+	// return json notfound error reponse if notfound with status 404
+	// delete by id
+	fmt.Println("Delete Todo by ID:", id)
+	// return empty response with status 204
+	w.Header().Add("Content-Type", "application/json")
+	w.WriteHeader(http.StatusNoContent)
+	json.NewEncoder(w)
+}
+```
+
+จะเห็นว่าในแต่ละฟังก์ชันนั้นจะส่วนที่ต้องเรียกใช้งานจะโค้ดอยู่ 2 ส่วน คือ
+
+1. ส่วนที่ต้องเรียกใช้งานจาก http framework เช่น การอ่านค่าจาก json, query param, path param และการ reponse ค่ากลับไป
+2. Business Logic เช่น การ validate, การบันทึก, การแก้ไข และการลบ
+
+สมมุติว่าเราต้องการเปลี่ยนจาก http ไปเป็น gin หน้าตาของ handler function จะต้องเปลี่ยนเป็น
+
+```go
+func (c *gin.Context) {
+
+}
+```
+
+ซึ่งจะกระทบกับโค้ดในส่วนที่ 1 ต้องแก้ใหม่ทั้งหมด ดังนั้นเพื่อที่จะทำให้ handler function ของเราลองรับได้ทุก framework เราจะเปลี่ยนให้ handler function เป็นแบบนี้แทน
+
+```go
+func (c context.MyContext) {
+
+}
+```
+
+## สร้าง MyContext
+
+จากโค้ดตัวอย่างจะเห็นว่าเรามีการใช้งาน http framework อยู่ 4 อย่างด้วยกันคือ
+
+- การอ่านค่าจาก JSON แล้วแปลงเป็น struct → จะสร้างเป็น method Bind()
+- การอ่านค่าจาก Query param → จะสร้างเป็น method Query()
+- การอ่านค่าจาก Path param → จะสร้างเป็น method Path()
+- การคืนค่ากลับไปแบบ JSON → จะสร้างเป็น method JSON()
+
+เราจะเอาทั้ง 4 method นี้ และอื่นๆ ที่ต้องใช้ มาสร้างเป็น interface แล้วค่อยไป implement แยกตามแต่ละ framework ว่าจะทำงานอย่างไร
+
+```go:context/context.go
+package context
+
+type MyContext interface {
+	Bind(v interface{}) error                   // รับ struct pointer อะไรก็ได้เข้ามา bind จาก json boby
+	BindQuery(interface{}) error                // รับ struct pointer อะไรก็ได้เข้ามา bind จาก query ทั้งหมด
+	Query(k string) (string, bool)              // รับ key ที่ต้องการหาเข้ามา ถ้าไม่เจอจะคืนค่า false กลับไป
+	DefaultQuery(k string, d string) string     // รับ key ที่ต้องการหาเข้ามา ถ้าไม่เจอให้คืนค่า default ที่กำหนดกลับไป
+	Param(k string) string                      // รับ key ที่ต้องการหาเข้ามา
+	Header(k string) string                     // รับ key ที่ต้องการหาเข้ามา
+	RequestId() string                          // เอาไว้อ่านค่าจาก header ที่ใช้งานบ่อยๆ เช่น X-Request-Id
+	ResponseError(httpstatus int, err string)   // ส่ง json error กลับไปตาม status ที่กำหนด
+	ResponseJSON(httpstatus int, v interface{}) // ส่ง json จาก struct กลับไปตาม status ที่กำหนด
+}
+```
+
+จากโค้ดตัวอย่างเราใช้ http ก็ให้สร้าง `HTTPContext` ขึ้นมา
+
+```go:context/context_http.go
+package context
+
+import (
+	"encoding/json"
+	"net/http"
+	"strings"
+
+	"github.com/gorilla/mux"
+)
+
+type HttpContext struct {
+	w http.ResponseWriter
+	r *http.Request
+}
+
+func NewHttpContext(w http.ResponseWriter, r *http.Request) MyContext {
+	return &HttpContext{
+		w: w,
+		r: r,
+	}
+}
+
+func (c *HttpContext) Bind(v interface{}) error {
+	return json.NewDecoder(c.r.Body).Decode(v)
+}
+
+func (c *HttpContext) BindQuery(v interface{}) error {
+	querys := c.r.URL.Query()
+	m := map[string]string{}
+	for k, v := range querys {
+		m[k] = v[0]
+	}
+	jsonStr, err := json.Marshal(m)
+	if err != nil {
+		return err
+	}
+
+	return json.NewDecoder(strings.NewReader(string(jsonStr))).Decode(v)
+}
+
+func (c *HttpContext) Query(key string) (string, bool) {
+	query := c.r.URL.Query()
+	if vals, ok := query[key]; ok {
+		return vals[0], true
+	}
+	return "", false
+}
+
+func (c *HttpContext) DefaultQuery(key string, d string) string {
+	query := c.r.URL.Query()
+	if vals, ok := query[key]; ok {
+		return vals[0]
+	}
+	return d
+}
+
+func (c *HttpContext) Param(key string) string {
+	vars := mux.Vars(c.r)
+	return vars[key]
+}
+
+func (c *HttpContext) Header(key string) string {
+	return c.r.Header.Get(key)
+}
+
+func (c *HttpContext) RequestId() string {
+	return c.Header("X-Request-Id")
+}
+
+func (c *HttpContext) ResponseError(code int, err string) {
+	c.ResponseJSON(code, map[string]string{
+		"error": err,
+	})
+}
+
+func (c *HttpContext) ResponseJSON(code int, data interface{}) {
+	c.w.Header().Add("Content-Type", "application/json")
+	c.w.WriteHeader(code)
+	if data != nil {
+		json.NewEncoder(c.w).Encode(data)
+	}
+}
+```
+
+### เปลี่ยน Handlers มาใช้ MyContext
+
+ถัดมาให้แก้ไขโค้ดทุก handler function ให้เปลี่ยนมารับค่า MyContext แทน
+
+- **CreateHandler** เปลี่ยน `(w http.ResponseWriter, r *http.Request)` → `(ctx MyContext)`
+
+โดยจะเปลี่ยนมาเรียกใช้ `ctx.Bind()`, `ctx.ResponseError()` และ `ctx.ResponseJSON()` แทน
+
+```go:handler/todo.go
+func (h TodoHandler) CreateHandler(ctx context.MyContext) {
+	// bind json to new stuct
+	var todo Todo
+	err := ctx.Bind(&todo)
+	if err != nil {
+		ctx.ResponseError(http.StatusBadRequest, err.Error())
+		return
+	}
+	// validate stuct if error return error reponse with status 400
+	if todo.Text == "" {
+		ctx.ResponseError(http.StatusBadRequest, "text is required")
+		return
+	}
+	// save
+	// return json response with status 201
+	ctx.ResponseJSON(http.StatusCreated, todo)
+}
+```
+
+- **ListHandler** เปลี่ยน `(w http.ResponseWriter, r *http.Request)` → `(ctx MyContext)`
+
+โดยจะเปลี่ยนมาเรียกใช้ `ctx.Query()` และ `ctx.ResponseJSON()` แทน
+
+```go:handler/todo.go
+func (h TodoHandler) ListHandler(ctx context.MyContext) {
+	// get query param for filter
+	term := "Text"
+	if val, ok := ctx.Query("term"); ok {
+		term = val
+	}
+	// list by filter
+	todos := []Todo{
+		{ID: 1, Text: term + "1", Completed: true},
+		{ID: 2, Text: term + "2", Completed: false},
+		{ID: 3, Text: term + "3", Completed: false},
+	}
+	// return json response with status 200
+	ctx.ResponseJSON(http.StatusOK, todos)
+}
+```
+
+- **GetHandler** เปลี่ยน `(w http.ResponseWriter, r *http.Request)` → `(ctx MyContext)`
+
+โดยจะเปลี่ยนมาเรียกใช้ `ctx.Param()` และ `ctx.ResponseJSON()` แทน
+
+```go:handler/todo.go
+func (h TodoHandler) GetHandler(ctx context.MyContext) {
+	// get id from path param
+	id, _ := strconv.Atoi(ctx.Param("id"))
+	// get by id
+	todo := Todo{
+		ID:        id,
+		Text:      "Get Todo by ID",
+		Completed: false,
+	}
+	// return json notfound error reponse if notfound with status 404
+	// return json response with status 200
+	ctx.ResponseJSON(http.StatusOK, todo)
+}
+```
+
+- **StatusUpdateHandler** เปลี่ยน `(w http.ResponseWriter, r *http.Request)` → `(ctx MyContext)`
+
+โดยจะเปลี่ยนมาเรียกใช้ `ctx.Param()`, `ctx.Bind()`, `ctx.ResponseError()` และ `ctx.ResponseJSON()` แทน
+
+```go:handler/todo.go
+func (h TodoHandler) StatusUpdateHandler(ctx context.MyContext) {
+	// get id from path param
+	id, _ := strconv.Atoi(ctx.Param("id"))
+	// bind json to patch stuct
+	var updateTodo Todo
+	err := ctx.Bind(&updateTodo)
+	if err != nil {
+		ctx.ResponseError(http.StatusBadRequest, err.Error())
+		return
+	}
+	// get by id
+	todo := Todo{
+		ID:        id,
+		Text:      "Update Todo Status by ID",
+		Completed: false,
+	}
+	// return json notfound error reponse if notfound with status 404
+	// udpate status
+	todo.Completed = updateTodo.Completed
+	// return json response with status 200
+	ctx.ResponseJSON(http.StatusOK, todo)
+}
+```
+
+- **DeleteHandler** เปลี่ยน `(w http.ResponseWriter, r *http.Request)` → `(ctx MyContext)`
+
+โดยจะเปลี่ยนมาเรียกใช้ `ctx.Param()` และ `ctx.ResponseJSON()` แทน
+
+```go:handler/todo.go
+func (h TodoHandler) DeleteHandler(ctx context.MyContext) {
+	// get id from path param
+	id, _ := strconv.Atoi(ctx.Param("id"))
+	// get by id
+	// return json notfound error reponse if notfound with status 404
+	// delete by id
+	fmt.Println("Delete Todo by ID:", id)
+	// return empty response with status 204
+	ctx.ResponseJSON(http.StatusNoContent, nil)
+}
+```
+
+### Router พัง
+
+หลังจากที่เราแก้ handler ทั้งหมดแล้ว จะพบว่าในส่วนของ router จะ error
+
+<div className="flex justify-center">
+  <div>![Flow](/static/images/go/golang-api-handlefunc/router-error.png)</div>
+</div>
+
+เนื่องจากสิ่งที่ router ของ gorilla/mux ต้องการจริงๆ คือ `func(http.ResponseWriter, *http.Request)` ไม่ใช่ `func(MyContext)` เราสามารแก้ปัญหาได้โดยการสร้าง wrapper function ขึ้นมา แบบนี้
+
+```go:context/context_http.go
+func WrapHTTPHandler(h func(MyContext)) func(http.ResponseWriter, *http.Request) {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h(NewHttpContext(w, r))
+	}
+}
+```
+
+แล้วแก้ที่ `setRouter()`
+
+```go:cmd/http/main.go
+func setRouter(r *mux.Router) {
+	h := handler.TodoHandler{}
+
+	todos := r.PathPrefix(BASE_URL + "/todos").Subrouter()
+	todos.HandleFunc("", context.WrapHTTPHandler(h.CreateHandler)).Methods("POST")
+	todos.HandleFunc("", context.WrapHTTPHandler(h.ListHandler)).Methods("GET")
+	todos.HandleFunc("/{id:[0-9]+}", context.WrapHTTPHandler(h.GetHandler)).Methods("GET")
+	todos.HandleFunc("/{id:[0-9]+}", context.WrapHTTPHandler(h.StatusUpdateHandler)).Methods("PATCH")
+	todos.HandleFunc("/{id:[0-9]+}", context.WrapHTTPHandler(h.DeleteHandler)).Methods("DELETE")
+}
+```
+
+โปรแกรมก็จะสามารถใช้งานได้ตามปกติแล้ว
+
+### ลองเปลี่ยนมาใช้ gin
+
+เมื่อเราต้องการเปลี่ยนมาใช้ [gin framework](https://github.com/gin-gonic/gin) เราก็ต้องไปสร้าง GinContext และฟังก์ชันขึ้นมา WrapGinHandler
+
+```go:context/context_gin.go
+package context
+
+import (
+	"github.com/gin-gonic/gin"
+)
+
+type GinContext struct {
+	*gin.Context
+}
+
+func NewGinContext(c *gin.Context) MyContext {
+	return &GinContext{
+		Context: c,
+	}
+}
+
+func (c *GinContext) Bind(v interface{}) error {
+	return c.Context.ShouldBindJSON(v)
+}
+
+func (c *GinContext) BindQuery(v interface{}) error {
+	return c.Context.ShouldBindQuery(v)
+}
+
+func (c *GinContext) Query(key string) (string, bool) {
+	return c.Context.GetQuery(key)
+}
+
+func (c *GinContext) DefaultQuery(key string, d string) string {
+	return c.Context.DefaultQuery(key, d)
+}
+
+func (c *GinContext) Param(key string) string {
+	return c.Context.Param(key)
+}
+
+func (c *GinContext) Header(key string) string {
+	return c.Context.GetHeader(key)
+}
+
+func (c *GinContext) RequestId() string {
+	return c.Header("x-trace-id")
+}
+func (c *GinContext) ResponseError(code int, err string) {
+	c.ResponseJSON(code, map[string]string{
+		"error": err,
+	})
+}
+
+func (c *GinContext) ResponseJSON(code int, data interface{}) {
+	c.Context.JSON(code, data)
+}
+
+func WrapGinHandler(h func(MyContext)) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		h(NewGinContext(c))
+	}
+}
+```
+
+แล้วสร้าง HTTP Server ขึ้นมาโดยใช้ gin framework ซึ่งจะสามารถใช้งาน handlers function เดิมได้เลย โดยไม่ต้องแก้ไขอะไรเลย
+
+```go:cmd/gin/main.go
+package main
+
+import (
+	"goapi-handlefunc/context"
+	"goapi-handlefunc/handler"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+const (
+	BASE_URL = "/api/v1"
+	PORT     = ":8080"
+)
+
+func main() {
+	r := gin.Default()
+
+	setRouter(r)
+
+	http.ListenAndServe(PORT, r)
+}
+
+func setRouter(r *gin.Engine) {
+	h := handler.TodoHandler{}
+
+	todos := r.Group(BASE_URL + "/todos")
+	todos.POST("", context.WrapGinHandler(h.CreateHandler))
+	todos.GET("", context.WrapGinHandler(h.ListHandler))
+	todos.GET("/:id", context.WrapGinHandler(h.GetHandler))
+	todos.PATCH("/:id", context.WrapGinHandler(h.StatusUpdateHandler))
+	todos.DELETE("/:id", context.WrapGinHandler(h.DeleteHandler))
+}
+```
+
+### ลองเปลี่ยนมาใช้ fiber
+
+เมื่อเราต้องการเปลี่ยนมาใช้ [fiber framework](https://github.com/gofiber/fiber) เราก็ต้องไปสร้าง FiberContext และฟังก์ชันขึ้นมา WrapFiberHandler
+
+```go:context/context_fiber.go
+package context
+
+import (
+	"github.com/gofiber/fiber/v2"
+)
+
+type FiberContext struct {
+	*fiber.Ctx
+}
+
+func NewFiberContext(c *fiber.Ctx) MyContext {
+	return &FiberContext{
+		Ctx: c,
+	}
+}
+
+func (c *FiberContext) Bind(v interface{}) error {
+	return c.Ctx.BodyParser(v)
+}
+
+func (c *FiberContext) BindQuery(v interface{}) error {
+	return c.Ctx.QueryParser(v)
+}
+
+func (c *FiberContext) Query(key string) (string, bool) {
+	q := c.Ctx.Query(key)
+	return q, true
+}
+
+func (c *FiberContext) DefaultQuery(key string, d string) string {
+	return c.Ctx.Query(key, d)
+}
+
+func (c *FiberContext) Param(key string) string {
+	return c.Ctx.Params(key)
+}
+
+func (c *FiberContext) Header(key string) string {
+	return c.Ctx.GetRespHeader(key)
+}
+
+func (c *FiberContext) RequestId() string {
+	return c.Header("x-trace-id")
+}
+
+func (c *FiberContext) ResponseError(code int, err string) {
+	c.ResponseJSON(code, map[string]string{
+		"error": err,
+	})
+}
+
+func (c *FiberContext) ResponseJSON(code int, data interface{}) {
+	c.Ctx.SendStatus(code)
+	c.Ctx.JSON(data)
+}
+
+func WrapFiberHandler(h func(MyContext)) func(*fiber.Ctx) error {
+	return func(c *fiber.Ctx) error {
+		h(NewFiberContext(c))
+		return nil
+	}
+}
+```
+
+แล้วสร้าง HTTP Server ขึ้นมาโดยใช้ gin framework ซึ่งจะสามารถใช้งาน handlers function เดิมได้เลย โดยไม่ต้องแก้ไขอะไรเลย
+
+```go:cmd/fiber/main.go
+package main
+
+import (
+	"goapi-handlefunc/context"
+	"goapi-handlefunc/handler"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+const (
+	BASE_URL = "/api/v1"
+	PORT     = ":8080"
+)
+
+func main() {
+	app := fiber.New()
+	setRouter(app)
+
+	app.Listen(PORT)
+}
+
+func setRouter(r *fiber.App) {
+	h := handler.TodoHandler{}
+
+	todos := r.Group(BASE_URL + "/todos")
+	todos.Post("", context.WrapFiberHandler(h.CreateHandler))
+	todos.Get("", context.WrapFiberHandler(h.ListHandler))
+	todos.Get("/:id", context.WrapFiberHandler(h.GetHandler))
+	todos.Patch("/:id", context.WrapFiberHandler(h.StatusUpdateHandler))
+	todos.Delete("/:id", context.WrapFiberHandler(h.DeleteHandler))
+}
+```
+
+---
+
+สรุปเมื่อเราเปลี่ยน handlers function ของเรามาใช้ interface MyContext ก็จะทำให้เราสามารถสลับเปลี่ยนไปใช้ web framework อื่นๆ ได้ง่ายขึ้น โดยไม่กระทบกับโค้ดหลักของเรา สิ่งที่จะต้องแก้จะเหลือแค่ 2 อย่างคือ
+
+1. สร้าง Context ใหม่ตาม web framework ที่จะใช้งาน
+2. ต้องแก้ไขโค้ดในส่วนที่สร้าง HTTP Server และการสร้าง Routers
+
+ซึ่งจริงๆ แล้ว เราสามารถใช้เทคนิคนี้ไปใช้กับ handlers ของ message queue ด้วยก็ได้ โดยการไป implement context ของ message queue ขึ้นมาแทน
+
+<aside>
+💡 ดูโค้ดทั้งหมดได้ที่ [https://github.com/somprasongd/blog-golang/tree/main/goapi-handlefunc](https://github.com/somprasongd/blog-golang/tree/main/goapi-handlefunc)
+
+</aside>
