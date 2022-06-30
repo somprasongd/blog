@@ -142,6 +142,7 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   }
 
   func (r TodoRepositoryDB) Create(todo *model.Todo) error {
+	// ย้ายโค้ดที่ติดต่อฐานข้อมูลมาไว้ที่นี่
   	return r.db.Create(&todo).Error
   }
   ```
@@ -167,6 +168,8 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   }
 
   func (s TodoService) Create(form dto.NewTodoForm) (*dto.TodoResponse, error) {
+	// ย้ายโค้ดที่เป็น business logic มาไว้ที่นี่
+	// การตรวจสอบ
   	if form.Text == "" {
   		return nil, errors.New("text is required")
   	}
@@ -174,12 +177,13 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   	todo := model.Todo{
   		Text: form.Text,
   	}
-
+	// เรียกใช้ repo เพื่อบันทึกข้อมูลใหม่
   	err := s.repo.Create(&todo)
   	if err != nil {
   		return nil, errors.New("database error while insert new todo")
   	}
 
+	// สร้าง struct ให้ handler ส่งกลับไปหา client
   	serializedTodo := dto.TodoResponse{
   		ID:   todo.ID,
   		Text: todo.Text,
@@ -211,7 +215,8 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   }
 
   func (h TodoHandler) CreateTodo(c *fiber.Ctx) error {
-  	// bind json to struct
+  	// เหลือโค้ดที่จัดการเฉพาะ Request กับ Response
+	// แปลง json เป็น struct
   	todoForm := new(dto.NewTodoForm)
   	if err := c.BodyParser(todoForm); err != nil {
   		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -219,15 +224,16 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   		})
 
   	}
-
+	// ส่งต่อไปให้ service ทำงาน
   	todo, err := h.serv.Create(*todoForm)
   	if err != nil {
+		// ตรงนี้ควรให้ service ส่งมาบอกด้วยว่าให้ส่ง response code อะไร
   		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
   			"message": err.Error(),
   		})
   	}
 
-  	// Return new todo in json format
+  	// คืนค่า todo ที่เพิ่งบันทึกเสร็จกลับไปในรูป json
   	return c.JSON(todo)
   }
   ```
@@ -255,6 +261,7 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
 
   	app := fiber.New()
 
+	// สร้าง dependencies ทั้งหมด
   	repo := repository.NewTodoRepositoryDB(db)
   	serv := services.NewTodoService(repo)
   	h := handlers.NewTodoHandler(serv)
@@ -291,7 +298,7 @@ import (
 	"goapi-hex/pkg/model"
 )
 
-// output port
+// interface สำหรับ output port
 type TodoRepository interface {
 	Create(t *model.Todo) error
 	// Find() ([]model.Todo, error)
@@ -300,7 +307,7 @@ type TodoRepository interface {
 	// DeleteById(id int) error
 }
 
-// input port
+// interface สำหรับ input port
 type TodoService interface {
 	Create(newTodo dto.NewTodoForm) (*dto.TodoResponse, error)
 	// List(completed string) ([]dto.TodoResponse, error)
@@ -334,6 +341,7 @@ type TodoService interface {
   	db *gorm.DB
   }
 
+  // เปลี่ยนเป็น return ports.TodoRepository แทน
   func NewTodoRepositoryDB(db *gorm.DB) ports.TodoRepository {
   	return &todoRepositoryDB{db}
   }
@@ -356,7 +364,8 @@ type TodoService interface {
   type todoService struct {
   	repo ports.TodoRepository
   }
-
+  
+  // เปลี่ยนเป็น return ports.TodoService แทน
   func NewTodoService(repo ports.TodoRepository) ports.TodoService {
   	return &todoService{repo}
   }
