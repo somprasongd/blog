@@ -1,0 +1,402 @@
+---
+title: 'Principles of Hexagonal Architecture'
+date: '2022-06-30'
+lastmod: '2022-06-30'
+tags: ['hexagonal', 'go', 'api', 'architecture']
+draft: false
+summary: 'Hexagonal architecture เป็นรูปแบบหนึ่งที่ใช้ในการออกแบบระบบ ที่มีแนวคิดแบ่งระบบออกเป็น ส่วนๆ เพื่อทำให้ business logic นั้น แยกออกจากส่วนต่างๆ เช่น framework หรือ database ได้'
+---
+
+# Principles of Hexagonal Architecture
+
+Hexagonal architecture เป็นรูปแบบหนึ่งที่ใช้ในการออกแบบระบบ ที่มีแนวคิดแบ่งระบบออกเป็น ส่วนๆ เพื่อทำให้ business logic นั้น แยกออกจากส่วนต่างๆ เช่น framework หรือ database ได้
+
+ซึ่งเมื่อทำแบบนี้แล้วจะทำ business logic ของเราสามารถ test ได้โดยไม่ต้องมี dependency จากระบบอื่นๆ เลย และทำให้แต่ละส่วนนั่นสามารถสลับใช้แทนกันได้ เช่นการเปลี่ยน databse จาก postgresql เป็น mongodb ก็จะไม่กระทบ business logic ของเรา เหมือนกับ Port กับ Adapter ที่สามารถเปลี่ยนไปใช้ Adapter ตัวอื่นได้ที่ใช้ Port แบบเดียวกัน
+
+## **Principles of Hexagonal Architecture**
+
+การจะใช้ Hexagonal architecture นั้นมีหลักการง่ายๆ อยู่ 3 ข้อ คือ
+
+1. ให้แบ่งระบบแยกออกจากกันเป็น 3 ส่วน คือ **_User-Side_**, **_Application Core_** และ **_Server-Side_**
+2. ต้องทำให้ส่วนของ **_Application Core_** จะไม่ขึ้นกับ **_User-Side_** และ **_Server-Side_**
+3. ให้แต่ละส่วนจะแยกออกจากกันด้วย `interface` โดยใช้ **_Ports and Adapters_**
+
+### **User-Side (ด้านซ้าย)**
+
+เป็นฝั่งของ User Interface ที่ให้ผู้ใช้งาน หรือโปรแกรมภายนอก เข้ามาติดต่อกับโปแกรมของเรา โดยจะเป็นตัวกำหนดว่าจะโต้ตอบกันยังไง เช่น ถ้าเป็น REST API ก็คือ Rest Controller ที่เอาไว้จัดการแต่ละ routes และตอบ JSON คืนกลับไป ซึ่งจะส่วนที่เรียกใช้ Business Logic
+
+### Application Core **(ตรงกลาง)**
+
+Application Core จะอยู่ตรงกลางซึ่งเป็นโค้ดที่แยกออกมาให้เป็นอิสระ ไม่ขึ้นกับ User-Side และ Server-Side ภายในจะมี Application Service ที่เป็น Business Logic กับ Domain Model
+
+### **Server-Side (ด้านขวา)**
+
+เป็นฝั่งของ Infrastructure เป็นโค้ดในส่วนที่โปรแกรมต้องการทำเพิ่มเติม เช่น การดึงข้อมูลจาก database หรือเขียนไฟล์ หรือเรียกไปยัง service อื่นๆ ซึ่งจะถูกจัดการจาก Business Logic
+
+### Ports and Adapters
+
+Hexagonal architecture นั้นจะมีชื่อเรียกอย่างอย่างว่า Ports and Adapters เนื่องลักษณะการออกแบบของมันที่มีการแยกส่วนของ business logic ออกมาไว้ตรงกลาง และมี ports 2 ข้างเอาไว้สื่อสารกับด้านนอก
+
+- **Input Port** (Primary/Driving Port): เป็น interface ที่ให้โลกภายนอกสามารถเรียกเข้ามายัง business logic ได้ เช่น rest controller
+- **Output Port** (Secondary/Driven Port) เป็น interface ที่ให้ business logic เอาไว้ติดต่อกับข้างนอก เช่น การดึงจ้อมูลออกมาจาก database
+
+<div className="flex justify-center">
+  <div>![hexagonal](/static/images/architecture/hexagonal/hexagonal.png)</div>
+</div>
+
+และมี adapters อยู่รอบข้าง ทั้ง 2 ข้าง เช่นกัน
+
+- **Input Adapter** (Primary/Driving Adapter): ตัวอย่างเช่น REST API จะมี rest controller เป็น input adapter ที่จะสั่งให้ application core ทำงาน ผ่านทาง input port
+- **Output Adapter** (Secondary/Driven Adapter): ตัวอย่างเช่น ถ้า application core ต้องการข้อมูลจาก database ก็จะสร้าง data repository ที่ implement ตาม output port ที่เป็นช่องทางให้ application core เรียกใช้
+
+---
+
+เมื่อเข้าใจถึงหลักการของ Hexagonal Architecture แล้ว คร่าวนี้ลองมาสร้าง REST API โดยใช้หลักการทั้ง 3 ข้อ ของ Hexagonal Architecture กันดู
+
+สมมุติว่ามี Todo API ง่ายๆ แบบนี้
+
+```go
+func main() {
+	db, err := database.ConnectDB("gorm.db")
+	if err != nil {
+		panic(err)
+	}
+	defer database.CloseDB(db)
+
+	app := fiber.New()
+
+	h := handlers.NewTodoHandler(db)
+
+	todos := app.Group("/api/todos")
+	todos.Post("", h.CreateTodo)
+	// todos.Get("", h.ListTodo)
+	// todos.Get("/:id", h.GetTodo)
+	// todos.Patch("/:id", h.UpdateTodo)
+	// todos.Delete("/:id", h.DeleteTodo)
+
+	app.Listen(":8080")
+}
+```
+
+โดยปกติเราจะสร้าง handler แบบนี้
+
+```go
+func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
+	// 1. bind json to struct
+	todoForm := new(TodoForm)
+	if err := c.BodyParser(todoForm); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+
+	}
+	// 2. validate
+	if todoForm.Text == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "text is required",
+		})
+
+	}
+	// 3. insert new todo to database
+	todo := model.Todo{
+		Text: todoForm.Text,
+		Done: false,
+	}
+	err := h.db.Create(&todo).Error
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": "database error",
+		})
+	}
+
+	// 4. Return new todo in json format
+	return c.JSON(todo)
+}
+```
+
+โดยในแต่ละ handlers จะมีโค้ดทั้งหมด ไม่ว่าจะเป็นการจัดการกับ request ที่รับเข้ามา business logic ในการตรวจสอบค่า การบันทึกข้อมูลลงฐานข้อมูล และตอบ response กลับไป ดังนั้นเริ่มจากหลักการข้อที่ 1 แบ่งเป็น 3 ส่วน
+
+### **Principle 1: Separate _User-Side_, Application Core and _Server-Side_**
+
+<div className="flex justify-center">
+  <div>![p1](/static/images/architecture/hexagonal/p1.png)</div>
+</div>
+
+- **Server-Side** จะเป็นโค้ดที่เอาไว้จัดการกับ database ทั้งหมด โดยจะถูกเรียกใช้โดย business logic
+
+  ```go
+  package repository
+
+  import (
+  	"goapi-hex/pkg/model"
+
+  	"gorm.io/gorm"
+  )
+
+  type TodoRepositoryDB struct {
+  	db *gorm.DB
+  }
+
+  func NewTodoRepositoryDB(db *gorm.DB) *TodoRepository {
+  	return &TodoRepository{db}
+  }
+
+  func (r TodoRepositoryDB) Create(todo *model.Todo) error {
+  	return r.db.Create(&todo).Error
+  }
+  ```
+
+- **Application Core** จะมี Domain Model และ Application Service ที่ไว้จัดการกับ business logic เช่น การตรวจสอบค่าต่างๆ และจะคืนค่า error หรือผลลัพธ์กลับไปให้ Rest Controllers
+
+  ```go
+  package services
+
+  import (
+  	"errors"
+  	"goapi-hex/pkg/dto"
+  	"goapi-hex/pkg/model"
+  	"goapi-hex/pkg/repository"
+  )
+
+  type TodoService struct {
+  	repo *repository.TodoRepositoryDB
+  }
+
+  func NewTodoService(repo *repository.TodoRepositoryDB) *TodoService {
+  	return &TodoService{repo}
+  }
+
+  func (s TodoService) Create(form dto.NewTodoForm) (*dto.TodoResponse, error) {
+  	if form.Text == "" {
+  		return nil, errors.New("text is required")
+  	}
+
+  	todo := model.Todo{
+  		Text: form.Text,
+  	}
+
+  	err := s.repo.Create(&todo)
+  	if err != nil {
+  		return nil, errors.New("database error while insert new todo")
+  	}
+
+  	serializedTodo := dto.TodoResponse{
+  		ID:   todo.ID,
+  		Text: todo.Text,
+  		Done: todo.Done,
+  	}
+
+  	return &serializedTodo, nil
+  }
+  ```
+
+- **User-Side** คือ ส่วนที่ติดต่อกับ user หรือโปรแกรมภายนอก ดังนั้นตรงนี้จะเป็นส่วนของ Rest Controllers มีหน้าที่คือ รับ request เข้ามา เพื่ออ่านค่าที่ต้องการออกมา เช่นแปลง json เป็น struct แล้วส่งไปให้ business logic ทำงานต่อ และคืนค่า response กลับไป ตามที่ business logic ส่งกลับมาให้
+
+  ```go
+  package handlers
+
+  import (
+  	"goapi-hex/pkg/dto"
+  	"goapi-hex/pkg/services"
+
+  	"github.com/gofiber/fiber/v2"
+  )
+
+  type TodoHandler struct {
+  	serv *services.TodoService
+  }
+
+  func NewTodoHandler(serv *services.TodoService) *TodoHandler {
+  	return &TodoHandler{serv}
+  }
+
+  func (h TodoHandler) CreateTodo(c *fiber.Ctx) error {
+  	// bind json to struct
+  	todoForm := new(dto.NewTodoForm)
+  	if err := c.BodyParser(todoForm); err != nil {
+  		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+  			"message": err.Error(),
+  		})
+
+  	}
+
+  	todo, err := h.serv.Create(*todoForm)
+  	if err != nil {
+  		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+  			"message": err.Error(),
+  		})
+  	}
+
+  	// Return new todo in json format
+  	return c.JSON(todo)
+  }
+  ```
+
+- แล้วแก้ที่ main.go เพิ่มทำ dependency injection
+
+  ```go
+  package main
+
+  import (
+  	"goapi-hex/pkg/database"
+  	"goapi-hex/pkg/handlers"
+  	"goapi-hex/pkg/repository"
+  	"goapi-hex/pkg/services"
+
+  	"github.com/gofiber/fiber/v2"
+  )
+
+  func main() {
+  	db, err := database.ConnectDB("gorm.db")
+  	if err != nil {
+  		panic(err)
+  	}
+  	defer database.CloseDB(db)
+
+  	app := fiber.New()
+
+  	repo := repository.NewTodoRepositoryDB(db)
+  	serv := services.NewTodoService(repo)
+  	h := handlers.NewTodoHandler(serv)
+
+  	todos := app.Group("/api/todos")
+  	todos.Post("", h.CreateTodo)
+  	// todos.Get("", h.ListTodo)
+  	// todos.Get("/:id", h.GetTodo)
+  	// todos.Patch("/:id", h.UpdateTodo)
+  	// todos.Delete("/:id", h.DeleteTodo)
+
+  	app.Listen(":8080")
+  }
+  ```
+
+### **Principle 2 : _Business Logic_ does not depend on anything**
+
+หลังจากแบ่งออกเป็น 3 ส่วนแล้ว จะเห็นว่า Business Logic จะขึ้นอยู่กับ Data Layer ดังนั้นให้เริ่มจากตรงนี้ก่อน โดยการใช้หลักการของ Dependency Inversion ซึ่งมี 2 ข้อ คือ
+
+1. High-level modules should not depend on low-level modules. Both should depend on abstractions.
+2. Abstractions should not depend on details. Details should depend on abstractions.
+
+<div className="flex justify-center">
+  <div>![p2](/static/images/architecture/hexagonal/p2.png)</div>
+</div>
+
+ทำได้โดยการสร้าง `Interface` ขึ้นมาทั้งสองข้างของรอบ Business Logic และให้ User-Side และ Server-Side มา depend on ทั้ง 2 interfaces นี้แทน
+
+```go
+package ports
+
+import (
+	"goapi-hex/pkg/dto"
+	"goapi-hex/pkg/model"
+)
+
+// output port
+type TodoRepository interface {
+	Create(t *model.Todo) error
+	// Find() ([]model.Todo, error)
+	// FindById(id int) (*model.Todo, error)
+	// UpdateStatusById(id int, isDone bool) error
+	// DeleteById(id int) error
+}
+
+// input port
+type TodoService interface {
+	Create(newTodo dto.NewTodoForm) (*dto.TodoResponse, error)
+	// List(completed string) ([]dto.TodoResponse, error)
+	// Get(id int) (*dto.TodoResponse, error)
+	// Update(id int, updateTodo dto.UpdateTodoForm) error
+	// Delete(id int) error
+}
+```
+
+### **Principle 3 : Isolate the boundaries by using Ports and Adapters**
+
+เมื่อเราสร้าง interfaces ขึ้นมาแล้ว เราก็จะทำมันให้เป็น Ports and Adapters ตามรูปด้านล่าง
+
+<div className="flex justify-center">
+  <div>![p3](/static/images/architecture/hexagonal/p3.png)</div>
+</div>
+
+- สร้าง Output Adapter โดยให้ TodoRepositoryDB ไป implement Output Port
+
+  ```go
+  package repository
+
+  import (
+  	"goapi-hex/pkg/model"
+  	"goapi-hex/pkg/ports"
+
+  	"gorm.io/gorm"
+  )
+
+  type todoRepositoryDB struct {
+  	db *gorm.DB
+  }
+
+  func NewTodoRepositoryDB(db *gorm.DB) ports.TodoRepository {
+  	return &todoRepositoryDB{db}
+  }
+
+  // ...
+  ```
+
+- แก้ Application Service ให้รับ Output Port เข้ามาแทนการรับ TodoRepositoryDB ตรงๆ และให้ โดยให้ TodoService ไป implement Input Port
+
+  ```go
+  package services
+
+  import (
+  	"errors"
+  	"goapi-hex/pkg/dto"
+  	"goapi-hex/pkg/model"
+  	"goapi-hex/pkg/ports"
+  )
+
+  type todoService struct {
+  	repo ports.TodoRepository
+  }
+
+  func NewTodoService(repo ports.TodoRepository) ports.TodoService {
+  	return &todoService{repo}
+  }
+
+  // ...
+  ```
+
+- สร้าง Input Adapter โดยการให้ TodoHandler รับ Input Port เข้ามาแทนการรับ TodoService ตรงๆ
+
+  ```go
+  package handlers
+
+  import (
+  	"goapi-hex/pkg/dto"
+  	"goapi-hex/pkg/ports"
+
+  	"github.com/gofiber/fiber/v2"
+  )
+
+  type TodoHandler struct {
+  	serv ports.TodoService
+  }
+
+  func NewTodoHandler(serv ports.TodoService) *TodoHandler {
+  	return &TodoHandler{serv}
+  }
+  ```
+
+เพียงเท่านี้เราก็จะได้ REST API ที่สร้างตามหลักการของ Hexagonal Architecture แล้ว
+
+---
+
+สรุปง่ายๆ คือ เมื่อเรานำ Hexagonal Architecture มาใช้จะมีสิ่งที่ต้องทำคือ
+
+- **Ports:** ทั้ง input port และ output port สร้างโค้ดเป็น Interface เอาไว้
+- **Input Adapter:** จะเป็นการเรียกใช้ Input Port ซึ่งจะถูก implement โดย application service
+- **Output Adapter:** จะเป็นการ implement ตาม Output Port และถูกเรียกใช้โดย applcation service
+
+<div className="flex justify-center">
+  <div>![sum](/static/images/architecture/hexagonal/sum.png)</div>
+</div>
+
+สามารถดูโค้ดทั้งหมดได้ที่ [https://github.com/somprasongd/blog-golang/tree/main/goapi-hex](https://github.com/somprasongd/blog-golang/tree/main/goapi-hex)
