@@ -4,41 +4,41 @@ date: '2022-06-30'
 lastmod: '2022-06-30'
 tags: ['hexagonal', 'go', 'api', 'architecture']
 draft: false
-summary: 'Hexagonal architecture เป็นรูปแบบหนึ่งที่ใช้ในการออกแบบระบบ ที่มีแนวคิดแบ่งระบบออกเป็น ส่วนๆ เพื่อทำให้ business logic นั้น แยกออกจากส่วนต่างๆ เช่น framework หรือ database ได้'
+summary: 'Hexagonal architecture เป็นรูปแบบหนึ่งที่ใช้ในการออกแบบระบบ ที่มีแนวคิดโดยแบ่งระบบออกเป็นส่วนๆ เพื่อทำให้ Business Logic นั้น แยกออกจากส่วนต่างๆ เช่น Framework หรือ Database ได้'
 ---
 
 # Principles of Hexagonal Architecture
 
-Hexagonal architecture เป็นรูปแบบหนึ่งที่ใช้ในการออกแบบระบบ ที่มีแนวคิดแบ่งระบบออกเป็น ส่วนๆ เพื่อทำให้ business logic นั้น แยกออกจากส่วนต่างๆ เช่น framework หรือ database ได้
+Hexagonal Architecture เป็นรูปแบบหนึ่งที่ใช้ในการออกแบบระบบ ที่มีแนวคิดโดยแบ่งระบบออกเป็นส่วนๆ เพื่อทำให้ Business Logic นั้น แยกออกจากส่วนต่างๆ เช่น Framework หรือ Database ได้
 
-ซึ่งเมื่อทำแบบนี้แล้วจะทำ business logic ของเราสามารถ test ได้โดยไม่ต้องมี dependency จากระบบอื่นๆ เลย และทำให้แต่ละส่วนนั่นสามารถสลับใช้แทนกันได้ เช่นการเปลี่ยน databse จาก postgresql เป็น mongodb ก็จะไม่กระทบ business logic ของเรา เหมือนกับ Port กับ Adapter ที่สามารถเปลี่ยนไปใช้ Adapter ตัวอื่นได้ที่ใช้ Port แบบเดียวกัน
+ซึ่งเมื่อทำแบบนี้แล้วจะทำ Business Logic ของเราสามารถ test ได้โดยไม่ต้องมี dependency จากระบบอื่นๆ เลย และทำให้แต่ละส่วนนั่นสามารถสลับใช้แทนกันได้ เช่น การเปลี่ยน databse จาก postgresql เป็น mongodb ก็จะไม่กระทบ Business Logic ของเรา เหมือนกับ Port กับ Adapter ที่สามารถเปลี่ยนไปใช้ Adapter ตัวอื่นๆ ได้ที่ใช้ Port แบบเดียวกัน
 
-## **Principles of Hexagonal Architecture**
+## Principles of Hexagonal Architecture
 
-การจะใช้ Hexagonal architecture นั้นมีหลักการง่ายๆ อยู่ 3 ข้อ คือ
+การจะใช้ Hexagonal Architecture นั้นมีหลักการง่ายๆ อยู่ 3 ข้อ คือ
 
-1. ให้แบ่งระบบแยกออกจากกันเป็น 3 ส่วน คือ **_User-Side_**, **_Application Core_** และ **_Server-Side_**
-2. ต้องทำให้ส่วนของ **_Application Core_** จะไม่ขึ้นกับ **_User-Side_** และ **_Server-Side_**
-3. ให้แต่ละส่วนจะแยกออกจากกันด้วย `interface` โดยใช้ **_Ports and Adapters_**
+1. แบ่งระบบแยกออกจากกันเป็น 3 ส่วน คือ **_User-Side_**, **_Application Core_** และ **_Server-Side_**
+2. ต้องทำให้ส่วนของ **_Application Core_** นั้นไม่ขึ้นกับส่วนของ **_User-Side_** และ **_Server-Side_**
+3. แต่ละส่วนจะแยกออกจากกันด้วย `interface` โดยใช้ **_Ports and Adapters_**
 
 ### **User-Side (ด้านซ้าย)**
 
-เป็นฝั่งของ User Interface ที่ให้ผู้ใช้งาน หรือโปรแกรมภายนอก เข้ามาติดต่อกับโปแกรมของเรา โดยจะเป็นตัวกำหนดว่าจะโต้ตอบกันยังไง เช่น ถ้าเป็น REST API ก็คือ Rest Controller ที่เอาไว้จัดการแต่ละ routes และตอบ JSON คืนกลับไป ซึ่งจะส่วนที่เรียกใช้ Business Logic
+เป็นฝั่งของ User Interface ที่ให้ผู้ใช้งาน หรือโปรแกรมภายนอก เข้ามาติดต่อกับโปแกรมของเรา โดยจะเป็นตัวกำหนดว่าจะโต้ตอบกันอย่างไร เช่น ถ้าเป็น REST API ก็คือ Rest Controllers ที่เอาไว้จัดการ request ในแต่ละ routes และตอบ JSON คืนกลับไป ตามผลลัพธ์ที่ได้จากการเรียกใช้ Business Logic
 
 ### Application Core **(ตรงกลาง)**
 
-Application Core จะอยู่ตรงกลางซึ่งเป็นโค้ดที่แยกออกมาให้เป็นอิสระ ไม่ขึ้นกับ User-Side และ Server-Side ภายในจะมี Application Service ที่เป็น Business Logic กับ Domain Model
+Application Core จะอยู่ตรงกลาง ซึ่งเป็นโค้ดที่แยกออกมาให้เป็นอิสระ ไม่ขึ้นกับ User-Side และ Server-Side ภายในจะมี Application Service ที่เป็น Business Logic กับ Domain Model
 
 ### **Server-Side (ด้านขวา)**
 
-เป็นฝั่งของ Infrastructure เป็นโค้ดในส่วนที่โปรแกรมต้องการทำเพิ่มเติม เช่น การดึงข้อมูลจาก database หรือเขียนไฟล์ หรือเรียกไปยัง service อื่นๆ ซึ่งจะถูกจัดการจาก Business Logic
+เป็นฝั่งของ Infrastructure เป็นโค้ดในส่วนที่โปรแกรมต้องการทำเพิ่มเติม เช่น การดึงข้อมูลจาก database หรือการเขียนไฟล์ หรือเรียกไปยัง service อื่นๆ ต่อ ซึ่งจะถูกจัดการจาก Business Logic
 
 ### Ports and Adapters
 
-Hexagonal architecture นั้นจะมีชื่อเรียกอย่างอย่างว่า Ports and Adapters เนื่องลักษณะการออกแบบของมันที่มีการแยกส่วนของ business logic ออกมาไว้ตรงกลาง และมี ports 2 ข้างเอาไว้สื่อสารกับด้านนอก
+Hexagonal Architecture นั้นจะมีชื่อเรียกอย่างอย่างว่า Ports and Adapters เนื่องลักษณะของการออกแบบที่มีการแยกส่วนของ Business Logic ออกมาไว้ตรงกลาง และมี ports 2 ข้าง เอาไว้สื่อสารกับด้านนอก
 
-- **Input Port** (Primary/Driving Port): เป็น interface ที่ให้โลกภายนอกสามารถเรียกเข้ามายัง business logic ได้ เช่น rest controller
-- **Output Port** (Secondary/Driven Port) เป็น interface ที่ให้ business logic เอาไว้ติดต่อกับข้างนอก เช่น การดึงจ้อมูลออกมาจาก database
+- **Input Port** (Primary/Driving Port): เป็น interface ที่ให้โลกภายนอกสามารถเรียกเข้ามายัง Business Logic ได้ เช่น Rest Controllers
+- **Output Port** (Secondary/Driven Port) เป็น interface ที่ให้ Business Logic เอาไว้ติดต่อกับฝั่ง Infrastructure เช่น การดึงจ้อมูลออกมาจาก database
 
 <div className="flex justify-center">
   <div>![hexagonal](/static/images/architecture/hexagonal/hexagonal.png)</div>
@@ -46,16 +46,16 @@ Hexagonal architecture นั้นจะมีชื่อเรียกอย
 
 และมี adapters อยู่รอบข้าง ทั้ง 2 ข้าง เช่นกัน
 
-- **Input Adapter** (Primary/Driving Adapter): ตัวอย่างเช่น REST API จะมี rest controller เป็น input adapter ที่จะสั่งให้ application core ทำงาน ผ่านทาง input port
-- **Output Adapter** (Secondary/Driven Adapter): ตัวอย่างเช่น ถ้า application core ต้องการข้อมูลจาก database ก็จะสร้าง data repository ที่ implement ตาม output port ที่เป็นช่องทางให้ application core เรียกใช้
+- **Input Adapter** (Primary/Driving Adapter): ตัวอย่างเช่น REST API จะมี Rest Controllers เป็น Input Adapter เพื่อสั่งให้ Application Core ทำงาน ผ่านทาง Input Port
+- **Output Adapter** (Secondary/Driven Adapter): ตัวอย่างเช่น ถ้า Application Core ต้องการข้อมูลจาก database ก็จะสร้าง Data Repository ที่ implements ตาม Output Port ที่เป็นช่องทางให้ Application Core เรียกใช้
 
----
+## แล้วจะนำมาใช้งานยังไง?
 
-เมื่อเข้าใจถึงหลักการของ Hexagonal Architecture แล้ว คร่าวนี้ลองมาสร้าง REST API โดยใช้หลักการทั้ง 3 ข้อ ของ Hexagonal Architecture กันดู
+เมื่อเข้าใจถึงหลักการของ Hexagonal Architecture แล้ว คร่าวนี้ก็ลองมาสร้าง REST API โดยใช้หลักการทั้ง 3 ข้อ ของ Hexagonal Architecture กันดู
 
 สมมุติว่ามี Todo API ง่ายๆ แบบนี้
 
-```go
+```go:cmd/main.go
 func main() {
 	db, err := database.ConnectDB("gorm.db")
 	if err != nil {
@@ -78,9 +78,9 @@ func main() {
 }
 ```
 
-โดยปกติเราจะสร้าง handler แบบนี้
+โดยปกติเราจะเขียนทุกอย่างรวมกันไว้ใน handler ที่เดียวแบบนี้
 
-```go
+```go:handlers/todo.go
 func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
 	// 1. bind json to struct
 	todoForm := new(TodoForm)
@@ -114,7 +114,7 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
 }
 ```
 
-โดยในแต่ละ handlers จะมีโค้ดทั้งหมด ไม่ว่าจะเป็นการจัดการกับ request ที่รับเข้ามา business logic ในการตรวจสอบค่า การบันทึกข้อมูลลงฐานข้อมูล และตอบ response กลับไป ดังนั้นเริ่มจากหลักการข้อที่ 1 แบ่งเป็น 3 ส่วน
+ดังนั้นให้เริ่มจากหลักการข้อที่ 1 คือ แบ่งเป็น 3 ส่วน
 
 ### **Principle 1: Separate _User-Side_, Application Core and _Server-Side_**
 
@@ -124,7 +124,7 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
 
 - **Server-Side** จะเป็นโค้ดที่เอาไว้จัดการกับ database ทั้งหมด โดยจะถูกเรียกใช้โดย business logic
 
-  ```go
+  ```go:repository/todo.go
   package repository
 
   import (
@@ -146,9 +146,9 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   }
   ```
 
-- **Application Core** จะมี Domain Model และ Application Service ที่ไว้จัดการกับ business logic เช่น การตรวจสอบค่าต่างๆ และจะคืนค่า error หรือผลลัพธ์กลับไปให้ Rest Controllers
+- **Application Core** จะมี Domain Model และ Application Service ที่ไว้จัดการกับ Business Logic เช่น การตรวจสอบค่าต่างๆ และจะคืนค่า error หรือผลลัพธ์กลับไปให้ Rest Controllers
 
-  ```go
+  ```go:services/todo.go
   package services
 
   import (
@@ -190,9 +190,9 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   }
   ```
 
-- **User-Side** คือ ส่วนที่ติดต่อกับ user หรือโปรแกรมภายนอก ดังนั้นตรงนี้จะเป็นส่วนของ Rest Controllers มีหน้าที่คือ รับ request เข้ามา เพื่ออ่านค่าที่ต้องการออกมา เช่นแปลง json เป็น struct แล้วส่งไปให้ business logic ทำงานต่อ และคืนค่า response กลับไป ตามที่ business logic ส่งกลับมาให้
+- **User-Side** คือ ส่วนที่ติดต่อกับ user หรือโปรแกรมภายนอก ดังนั้นตรงนี้จะเป็นส่วนของ Rest Controllers มีหน้าที่คือ รับ Request เข้ามา เพื่ออ่านค่าที่ต้องการออกมา เช่น แปลง json เป็น struct แล้วส่งไปให้ Business Logic ทำงานต่อ และคืนค่า Response กลับไป ตามที่ Business Logic ส่งกลับมาให้
 
-  ```go
+  ```go:handlers/todo.go
   package handlers
 
   import (
@@ -232,9 +232,9 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   }
   ```
 
-- แล้วแก้ที่ main.go เพิ่มทำ dependency injection
+- แล้วแก้ที่ main.go เพิ่มทำ Dependency Injection
 
-  ```go
+  ```go:cmd/main.go
   package main
 
   import (
@@ -272,7 +272,7 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
 
 ### **Principle 2 : _Business Logic_ does not depend on anything**
 
-หลังจากแบ่งออกเป็น 3 ส่วนแล้ว จะเห็นว่า Business Logic จะขึ้นอยู่กับ Data Layer ดังนั้นให้เริ่มจากตรงนี้ก่อน โดยการใช้หลักการของ Dependency Inversion ซึ่งมี 2 ข้อ คือ
+หลังจากแบ่งออกเป็น 3 ส่วนแล้ว จะเห็นว่า Business Logic นั้นจะขึ้นอยู่กับ Data Layer ดังนั้น ให้เริ่มจากตรงนี้ก่อน โดยการใช้หลักการของ Dependency Inversion ซึ่งมี 2 ข้อ คือ
 
 1. High-level modules should not depend on low-level modules. Both should depend on abstractions.
 2. Abstractions should not depend on details. Details should depend on abstractions.
@@ -281,9 +281,9 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   <div>![p2](/static/images/architecture/hexagonal/p2.png)</div>
 </div>
 
-ทำได้โดยการสร้าง `Interface` ขึ้นมาทั้งสองข้างของรอบ Business Logic และให้ User-Side และ Server-Side มา depend on ทั้ง 2 interfaces นี้แทน
+ทำได้โดยการสร้าง `Interface` ขึ้นมาทั้งสองข้างของ Business Logic และให้ User-Side และ Server-Side มา depend on ทั้ง 2 interfaces นี้แทน
 
-```go
+```go:ports/todo.go
 package ports
 
 import (
@@ -318,9 +318,9 @@ type TodoService interface {
   <div>![p3](/static/images/architecture/hexagonal/p3.png)</div>
 </div>
 
-- สร้าง Output Adapter โดยให้ TodoRepositoryDB ไป implement Output Port
+- สร้าง Output Adapter โดยให้ TodoRepositoryDB ไป implements Output Port
 
-  ```go
+  ```go:repository/todo.go
   package repository
 
   import (
@@ -343,7 +343,7 @@ type TodoService interface {
 
 - แก้ Application Service ให้รับ Output Port เข้ามาแทนการรับ TodoRepositoryDB ตรงๆ และให้ โดยให้ TodoService ไป implement Input Port
 
-  ```go
+  ```go:services/todo.go
   package services
 
   import (
@@ -366,7 +366,7 @@ type TodoService interface {
 
 - สร้าง Input Adapter โดยการให้ TodoHandler รับ Input Port เข้ามาแทนการรับ TodoService ตรงๆ
 
-  ```go
+  ```go:handlers/todo.go
   package handlers
 
   import (
@@ -389,11 +389,11 @@ type TodoService interface {
 
 ---
 
-สรุปง่ายๆ คือ เมื่อเรานำ Hexagonal Architecture มาใช้จะมีสิ่งที่ต้องทำคือ
+สรุปง่ายๆ คือ เมื่อเรานำ Hexagonal Architecture มาใช้ จะมีสิ่งที่ต้องทำ คือ
 
-- **Ports:** ทั้ง input port และ output port สร้างโค้ดเป็น Interface เอาไว้
-- **Input Adapter:** จะเป็นการเรียกใช้ Input Port ซึ่งจะถูก implement โดย application service
-- **Output Adapter:** จะเป็นการ implement ตาม Output Port และถูกเรียกใช้โดย applcation service
+- **Ports:** ทั้ง Input Port และ Output Port สร้างโค้ดเป็น `interface` เอาไว้
+- **Input Adapter:** จะเป็นการเรียกใช้ Input Port ซึ่งจะถูก implements โดย Application Service
+- **Output Adapter:** จะเป็นการ implements ตาม Output Port และถูกเรียกใช้โดย Applcation Service
 
 <div className="flex justify-center">
   <div>![sum](/static/images/architecture/hexagonal/sum.png)</div>
