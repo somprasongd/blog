@@ -17,19 +17,19 @@ Hexagonal Architecture เป็นรูปแบบหนึ่งที่ใ
 
 การจะใช้ Hexagonal Architecture นั้นมีหลักการง่ายๆ อยู่ 3 ข้อ คือ
 
-1. แบ่งระบบแยกออกจากกันเป็น 3 ส่วน คือ **_User-Side_**, **_Application Core_** และ **_Server-Side_**
-2. ต้องทำให้ส่วนของ **_Application Core_** นั้นไม่ขึ้นกับส่วนของ **_User-Side_** และ **_Server-Side_**
-3. แต่ละส่วนจะแยกออกจากกันด้วย `interface` โดยใช้ **_Ports and Adapters_**
+1. แบ่งระบบแยกออกจากกันเป็น 3 ส่วน คือ **User-Side**, **Application Core** และ **Server-Side**
+2. ต้องทำให้ส่วนของ **Application Core** นั้นไม่ขึ้นกับส่วนของ **User-Side** และ **Server-Side**
+3. แต่ละส่วนจะแยกออกจากกันด้วย `interface` โดยใช้ **Ports and Adapters**
 
-### **User-Side (ด้านซ้าย)**
+### User-Side (ด้านซ้าย)
 
 เป็นฝั่งของ User Interface ที่ให้ผู้ใช้งาน หรือโปรแกรมภายนอก เข้ามาติดต่อกับโปแกรมของเรา โดยจะเป็นตัวกำหนดว่าจะโต้ตอบกันอย่างไร เช่น ถ้าเป็น REST API ก็คือ Rest Controllers ที่เอาไว้จัดการ request ในแต่ละ routes และตอบ JSON คืนกลับไป ตามผลลัพธ์ที่ได้จากการเรียกใช้ Business Logic
 
-### Application Core **(ตรงกลาง)**
+### Application Core (ตรงกลาง)
 
 Application Core จะอยู่ตรงกลาง ซึ่งเป็นโค้ดที่แยกออกมาให้เป็นอิสระ ไม่ขึ้นกับ User-Side และ Server-Side ภายในจะมี Application Service ที่เป็น Business Logic กับ Domain Model
 
-### **Server-Side (ด้านขวา)**
+### Server-Side (ด้านขวา)
 
 เป็นฝั่งของ Infrastructure เป็นโค้ดในส่วนที่โปรแกรมต้องการทำเพิ่มเติม เช่น การดึงข้อมูลจาก database หรือการเขียนไฟล์ หรือเรียกไปยัง service อื่นๆ ต่อ ซึ่งจะถูกจัดการจาก Business Logic
 
@@ -80,24 +80,24 @@ func main() {
 
 โดยปกติเราจะเขียนทุกอย่างรวมกันไว้ใน handler ที่เดียวแบบนี้
 
-```go:handlers/todo.go
+```go:pkg/handlers/todo.go
 func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
-	// 1. bind json to struct
+	// 1. แปลง JSON เป็น struct
 	todoForm := new(TodoForm)
 	if err := c.BodyParser(todoForm); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"message": err.Error(),
+			"error": err.Error(),
 		})
 
 	}
-	// 2. validate
+	// 2. ตรวจสอบ
 	if todoForm.Text == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"message": "text is required",
+			"error": "text is required",
 		})
 
 	}
-	// 3. insert new todo to database
+	// 3. บันทึกข้อมูลลง database
 	todo := model.Todo{
 		Text: todoForm.Text,
 		Done: false,
@@ -105,30 +105,38 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
 	err := h.db.Create(&todo).Error
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"message": "database error",
+			"error": "database error while insert new todo",
 		})
 	}
 
-	// 4. Return new todo in json format
+	// 4. คืนค่า todo ที่เพิ่งบันทึกเสร็จกลับไปในรูปแบบ JSON
 	return c.JSON(todo)
 }
 ```
 
 ดังนั้นให้เริ่มจากหลักการข้อที่ 1 คือ แบ่งเป็น 3 ส่วน
 
-### **Principle 1: Separate _User-Side_, Application Core and _Server-Side_**
+### Principle 1: แบ่งเป็น 3 ส่วน User-Side, Application Core and Server-Side
+
+เริ่มจากเอาโค้ดที่รวมอยู่ใน handler มาแยกเป็น 3 ส่วน
 
 <div className="flex justify-center">
   <div>![p1](/static/images/architecture/hexagonal/p1.png)</div>
 </div>
 
-- **Server-Side** จะเป็นโค้ดที่เอาไว้จัดการกับ database ทั้งหมด โดยจะถูกเรียกใช้โดย business logic
+และการรับส่งข้อมูลระหว่างกันจะใช้ DTO เป็นตัวแทนของข้อมูลที่รับส่งกันระหว่าง User-Side กับ Business Logic และ Domain หรือ Model เป็นตัวแทนของข้อมูลที่รับส่งกันระหว่าง Business Logic กับ Server-Side ตามรูปด้านล่าง
 
-  ```go:repository/todo.go
+<div className="flex justify-center">
+  <div>![dto](/static/images/architecture/hexagonal/dto.png)</div>
+</div>
+
+- **Server-Side** เริ่มจากเอาโค้ดที่เอาไว้จัดการกับ database ทั้งหมด ออกจาก Business Logic มาไว้ที่ `TodoRepositoryDB` และจะถูกเรียกใช้โดย Business Logic
+
+  ```go:pkg/repository/todo.go
   package repository
 
   import (
-  	"goapi-hex/pkg/model"
+  	"goapi-hex/pkg/core/model"
 
   	"gorm.io/gorm"
   )
@@ -141,21 +149,21 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   	return &TodoRepository{db}
   }
 
+  // ย้ายโค้ดที่ติดต่อฐานข้อมูลมาไว้ที่นี่
   func (r TodoRepositoryDB) Create(todo *model.Todo) error {
-	// ย้ายโค้ดที่ติดต่อฐานข้อมูลมาไว้ที่นี่
   	return r.db.Create(&todo).Error
   }
   ```
 
-- **Application Core** จะมี Domain Model และ Application Service ที่ไว้จัดการกับ Business Logic เช่น การตรวจสอบค่าต่างๆ และจะคืนค่า error หรือผลลัพธ์กลับไปให้ Rest Controllers
+- **Application Core** จะมีอยู่ 2 ส่วน คือ Domain Model (ย้าย model มาไว้ใน core) และ Application Service ที่แยกเอาส่วนของ Business Logic ออกมา เช่น การตรวจสอบค่าต่างๆ, การเรียกใช้ Repository, การจัดการ error, การ log และส่งผลลัพธ์กลับไปให้ Rest Controllers
 
-  ```go:services/todo.go
+  ```go:pkg/core/services/todo.go
   package services
 
   import (
-  	"errors"
-  	"goapi-hex/pkg/dto"
-  	"goapi-hex/pkg/model"
+  	"goapi-hex/pkg/common/errs"
+  	"goapi-hex/pkg/core/dto"
+  	"goapi-hex/pkg/core/model"
   	"goapi-hex/pkg/repository"
   )
 
@@ -167,23 +175,23 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   	return &TodoService{repo}
   }
 
+  // ย้ายโค้ดที่เป็น business logic มาไว้ที่นี่
   func (s TodoService) Create(form dto.NewTodoForm) (*dto.TodoResponse, error) {
-	// ย้ายโค้ดที่เป็น business logic มาไว้ที่นี่
-	// การตรวจสอบ
+  	// การตรวจสอบ
   	if form.Text == "" {
-  		return nil, errors.New("text is required")
+  		return nil, errs.NewBadRequestError("text is required")
   	}
 
   	todo := model.Todo{
   		Text: form.Text,
   	}
-	// เรียกใช้ repo เพื่อบันทึกข้อมูลใหม่
+  	// เรียกใช้ repo เพื่อบันทึกข้อมูลใหม่
   	err := s.repo.Create(&todo)
   	if err != nil {
-  		return nil, errors.New("database error while insert new todo")
+  		return nil, errs.NewUnexpectedError("database error while insert new todo")
   	}
 
-	// สร้าง struct ให้ handler ส่งกลับไปหา client
+  	// สร้าง struct ที่ต้องการให้ handler ส่งกลับไปหา client
   	serializedTodo := dto.TodoResponse{
   		ID:   todo.ID,
   		Text: todo.Text,
@@ -194,14 +202,19 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   }
   ```
 
-- **User-Side** คือ ส่วนที่ติดต่อกับ user หรือโปรแกรมภายนอก ดังนั้นตรงนี้จะเป็นส่วนของ Rest Controllers มีหน้าที่คือ รับ Request เข้ามา เพื่ออ่านค่าที่ต้องการออกมา เช่น แปลง json เป็น struct แล้วส่งไปให้ Business Logic ทำงานต่อ และคืนค่า Response กลับไป ตามที่ Business Logic ส่งกลับมาให้
+- **User-Side** คือ ส่วนที่ติดต่อกับ user หรือโปรแกรมภายนอก ดังนั้นตรงนี้จะเป็นส่วนของ Rest Controllers ดังนั้นใน handler จะเหลือหน้าที่แค่
 
-  ```go:handlers/todo.go
+  - รับ Request เข้ามา เพื่ออ่านค่าที่ต้องการออกมา เช่น แปลง JSON เป็น struct
+  - แล้วส่งไปให้ Business Logic ทำงานต่อ
+  - และคืนค่า Response กลับไป ตามที่ Business Logic ส่งกลับมาให้
+
+  ```go:pkg/handlers/todo.go
   package handlers
 
   import (
-  	"goapi-hex/pkg/dto"
-  	"goapi-hex/pkg/services"
+  	"goapi-hex/pkg/common/errs"
+  	"goapi-hex/pkg/core/dto"
+  	"goapi-hex/pkg/core/services"
 
   	"github.com/gofiber/fiber/v2"
   )
@@ -214,9 +227,9 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   	return &TodoHandler{serv}
   }
 
+  // เหลือโค้ดที่จัดการเฉพาะ Request กับ Response
   func (h TodoHandler) CreateTodo(c *fiber.Ctx) error {
-  	// เหลือโค้ดที่จัดการเฉพาะ Request กับ Response
-	// แปลง json เป็น struct
+  	// แปลง JSON เป็น struct
   	todoForm := new(dto.NewTodoForm)
   	if err := c.BodyParser(todoForm); err != nil {
   		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
@@ -224,13 +237,12 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   		})
 
   	}
-	// ส่งต่อไปให้ service ทำงาน
+  	// ส่งต่อไปให้ service ทำงาน
   	todo, err := h.serv.Create(*todoForm)
   	if err != nil {
-		// ตรงนี้ควรให้ service ส่งมาบอกด้วยว่าให้ส่ง response code อะไร
-  		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-  			"message": err.Error(),
-  		})
+  		// error จะถูกจัดการมาจาก service แล้ว
+  		appErr := err.(errs.AppError)
+  		return c.Status(appErr.Code).JSON(appErr)
   	}
 
   	// คืนค่า todo ที่เพิ่งบันทึกเสร็จกลับไปในรูป json
@@ -244,10 +256,10 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   package main
 
   import (
-  	"goapi-hex/pkg/database"
+  	"goapi-hex/pkg/common/database"
+  	"goapi-hex/pkg/core/services"
   	"goapi-hex/pkg/handlers"
   	"goapi-hex/pkg/repository"
-  	"goapi-hex/pkg/services"
 
   	"github.com/gofiber/fiber/v2"
   )
@@ -261,7 +273,7 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
 
   	app := fiber.New()
 
-	// สร้าง dependencies ทั้งหมด
+  	// สร้าง dependencies ทั้งหมด
   	repo := repository.NewTodoRepositoryDB(db)
   	serv := services.NewTodoService(repo)
   	h := handlers.NewTodoHandler(serv)
@@ -277,9 +289,9 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   }
   ```
 
-### **Principle 2 : _Business Logic_ does not depend on anything**
+### **Principle 2 : Business Logic does not depend on anything**
 
-หลังจากแบ่งออกเป็น 3 ส่วนแล้ว จะเห็นว่า Business Logic นั้นจะขึ้นอยู่กับ Data Layer ดังนั้น ให้เริ่มจากตรงนี้ก่อน โดยการใช้หลักการของ Dependency Inversion ซึ่งมี 2 ข้อ คือ
+หลังจากแบ่งออกเป็น 3 ส่วนแล้ว จะเห็นว่า Business Logic จะมี dependency เป็น `TodoRepositoryDB` จึงทำให้โค้ดยังขึ้นอยู่กับ Data Layer การจะทำให้แยกออกจากกันได้นั้นจะใช้หลักการของ Dependency Inversion มาช่วย ซึ่งมีอยู่ 2 ข้อ คือ
 
 1. High-level modules should not depend on low-level modules. Both should depend on abstractions.
 2. Abstractions should not depend on details. Details should depend on abstractions.
@@ -288,14 +300,14 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
   <div>![p2](/static/images/architecture/hexagonal/p2.png)</div>
 </div>
 
-ทำได้โดยการสร้าง `Interface` ขึ้นมาทั้งสองข้างของ Business Logic และให้ User-Side และ Server-Side มา depend on ทั้ง 2 interfaces นี้แทน
+วิธีการคือสร้าง `Interface` ขึ้นมาที่ทั้งสองข้างของ Business Logic และให้ User-Side และ Server-Side มา depend on ทั้ง 2 interfaces นี้แทน
 
-```go:ports/todo.go
+```go:pkg/core/ports/todo.go
 package ports
 
 import (
-	"goapi-hex/pkg/dto"
-	"goapi-hex/pkg/model"
+	"goapi-hex/pkg/core/dto"
+	"goapi-hex/pkg/core/model"
 )
 
 // interface สำหรับ output port
@@ -317,26 +329,27 @@ type TodoService interface {
 }
 ```
 
-### **Principle 3 : Isolate the boundaries by using Ports and Adapters**
+### **Principle 3 : แยกแต่ละส่วนด้วย Ports and Adapters**
 
-เมื่อเราสร้าง interfaces ขึ้นมาแล้ว เราก็จะทำมันให้เป็น Ports and Adapters ตามรูปด้านล่าง
+เมื่อเราสร้าง interfaces ขึ้นมาแล้ว เราก็จะทำมันให้เป็น Ports and Adapters ตามรูปด้านล่าง เพื่อให้แต่ละส่วนแยกออกจากกันอย่างชัดเจน
 
 <div className="flex justify-center">
   <div>![p3](/static/images/architecture/hexagonal/p3.png)</div>
 </div>
 
-- สร้าง Output Adapter โดยให้ TodoRepositoryDB ไป implements Output Port
+- สร้าง Output Adapter โดยให้ `todoRepositoryDB` ไป implements Output Port `TodoRepository`
 
-  ```go:repository/todo.go
+  ```go:pkg/repository/todo.go
   package repository
 
   import (
-  	"goapi-hex/pkg/model"
-  	"goapi-hex/pkg/ports"
+  	"goapi-hex/pkg/core/model"
+  	"goapi-hex/pkg/core/ports"
 
   	"gorm.io/gorm"
   )
 
+  // แก้เป็น private เนื่องจากต้องการใช้สร้างได้จาก NewTodoRepositoryDB เท่านั้น
   type todoRepositoryDB struct {
   	db *gorm.DB
   }
@@ -349,22 +362,23 @@ type TodoService interface {
   // ...
   ```
 
-- แก้ Application Service ให้รับ Output Port เข้ามาแทนการรับ TodoRepositoryDB ตรงๆ และให้ โดยให้ TodoService ไป implement Input Port
+- แก้ Application Service ให้รับ Output Port (`ports.TodoRepository`) เข้ามาแทนการรับ `todoRepositoryDB` ตรงๆ และแก้ไขให้ `todoService` ไป implement Input Port ด้วย
 
-  ```go:services/todo.go
+  ```go:pkg/core/services/todo.go
   package services
 
   import (
-  	"errors"
-  	"goapi-hex/pkg/dto"
-  	"goapi-hex/pkg/model"
-  	"goapi-hex/pkg/ports"
+  	"goapi-hex/pkg/common/errs"
+  	"goapi-hex/pkg/core/dto"
+  	"goapi-hex/pkg/core/model"
+  	"goapi-hex/pkg/core/ports"
   )
 
+  // แก้เป็น private เนื่องจากต้องการใช้สร้างได้จาก NewTodoService เท่านั้น
   type todoService struct {
   	repo ports.TodoRepository
   }
-  
+
   // เปลี่ยนเป็น return ports.TodoService แทน
   func NewTodoService(repo ports.TodoRepository) ports.TodoService {
   	return &todoService{repo}
@@ -373,14 +387,14 @@ type TodoService interface {
   // ...
   ```
 
-- สร้าง Input Adapter โดยการให้ TodoHandler รับ Input Port เข้ามาแทนการรับ TodoService ตรงๆ
+- สร้าง Input Adapter ซึ่งก็คือ `TodoHandler` โดยการเปลียนให้รับ Input Port (`ports.TodoService`) เข้ามาแทน
 
   ```go:handlers/todo.go
   package handlers
 
   import (
-  	"goapi-hex/pkg/dto"
-  	"goapi-hex/pkg/ports"
+  	"goapi-hex/pkg/core/dto"
+  	"goapi-hex/pkg/core/ports"
 
   	"github.com/gofiber/fiber/v2"
   )
