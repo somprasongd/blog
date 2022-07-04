@@ -3,7 +3,7 @@ const siteMetadata = {
   author: 'Somprasong Damyos',
   headerTitle: 'Dev Notes',
   description: 'บันทึกเรื่องราวเกี่ยวกับการพัฒนาโปรแกรม',
-  language: 'en-us',
+  language: 'th-TH',
   theme: 'system', // system, dark or light
   siteUrl: 'https://somprasongd.work',
   siteRepo: 'https://github.com/somprasongd/blog',
@@ -24,9 +24,10 @@ const siteMetadata = {
     simpleAnalytics: false, // true or false
     umamiWebsiteId: '', // e.g. 123e4567-e89b-12d3-a456-426614174000
     googleAnalyticsId: '', // e.g. UA-000000-2 or G-XXXXXXX
+    posthogAnalyticsId: '', // posthog.init e.g. phc_5yXvArzvRdqtZIsHkEm3Fkkhm3d0bEYUXCaFISzqPSQ
   },
   newsletter: {
-    // supports mailchimp, buttondown, convertkit, klaviyo, revue
+    // supports mailchimp, buttondown, convertkit, klaviyo, revue, emailoctopus
     // Please add your .env file and modify it according to your selection
     provider: '',
   },
