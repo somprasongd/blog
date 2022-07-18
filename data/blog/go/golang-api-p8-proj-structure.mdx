@@ -1,0 +1,177 @@
+---
+title: 'API Service with Go: Project Structure'
+date: '2022-07-18'
+lastmod: '2022-07-18'
+tags: ['api', 'go', 'hexagonal']
+draft: false
+summary: 'ลองออกแบบโครงสร้างโปรเจคใหม่ เพื่อให้สะดวกต่อการแก้ไข รองรับการเพิ่มโมดูล และง่ายต่อการทดสอบ'
+---
+
+# Project Structure
+
+ปัญหาอย่างหนึ่ง เมื่อโปรเจคของเราเริ่มใหญ่ขึ้น มีการเพิ่มโมดูลใหม่ๆ เข้าไปการวางโครงสร้างโปรเจคของเราแบบตอนทำ [API Service with Go](https://somprasongd.work/blog/go/golang-api) นั้น ทำให้จัดการโค้ดลำบาก และจะเห็นว่าโค้ดที่เอาไว้จัดการ request แต่ละตัว จะเขียนรวมอยู่ที่เดียวกัน ทั้ง handler, business logic และการเชื่อมต่อฐานข้อมูล ทำให้ยากเขียนทดสอบโค้ด และยากต่อการแก้ไข เช่น ถ้าต้องการเปลี่ยนไปใช้ระบบฐานข้อมูลอื่นอย่าง mongodb จะพบว่าต้องแก้ไขโค้ดเยอะมาก และกระทบกับ business logic ด้วย
+
+งั้นเรามาลองออกแบบโครงสร้างโปรเจคกันใหม่ เพื่อให้สะดวกต่อการแก้ไข รองรับการเพิ่มโมดูล และง่ายต่อการทดสอบ แบบนี้ดู ([source code](https://github.com/somprasongd/blog-golang/tree/main/goapi-project-structure))
+
+```bash
+├── cmd
+│   └── api
+│       └── main.go
+├── deploy
+│   ├── Dockerfile
+│   ├── config
+│   │   └── pg
+│   │       └── sql
+│   │           └── init.sql
+│   ├── docker-compose.dev.yml
+│   ├── docker-compose.prod.yml
+│   └── docker-compose.yml
+├── pkg
+│   ├── app
+│   │   ├── app.go
+│   │   └── database
+│   │       └── gorm.go
+│   ├── common
+│   │   ├── error.go
+│   │   ├── handler-context.go
+│   │   ├── logger
+│   │   │   └── logger.go
+│   │   ├── pagination.go
+│   │   ├── response.go
+│   │   └── validator.go
+│   ├── config
+│   │   └── config.go
+│   ├── module
+│   │   ├── module.go
+│   │   ├── m1
+│   │   │   ├── module.go
+│   │   │   ├── core
+│   │   │   │   ├── dto
+│   │   │   │   ├── mapper
+│   │   │   │   ├── model
+│   │   │   │   ├── ports
+│   │   │   │   └── service
+│   │   │   ├── handler
+│   │   │   └── repository
+│   │   └── m2
+│   │       ├── module.go
+│   │       ├── core
+│   │       │   ├── dto
+│   │       │   ├── mapper
+│   │       │   ├── model
+│   │       │   ├── ports
+│   │       │   └── service
+│   │       ├── handler
+│   │       └── repository
+│   └── util
+│       └── some-util.go
+├── config.yaml
+├── go.mod
+├── go.sum
+└── Makefile
+```
+
+### cmd
+
+โค้ดของ `func main()` จะอยู่ที่นี้ โดยโปรเจคนี้จะเป็นการสร้าง api ดังนั้นจะเขียนไว้ที่ `cmd/api/main.go` ทำหน้าที่โหลดค่า configuration, สร้าง app.Context, โหลดโมดูลต่างๆ และสั่ง start server
+
+```go
+func main() {
+	// Load config
+	cfg := config.LoadConfig()
+
+	app := app.New(cfg)
+	// Cleanup when server stopped
+	defer app.Close()
+
+	// For Liveness Probe
+	app.CreateLivenessFile()
+
+	// Initialize data sources
+	app.InitDS()
+
+	// Create router (mux/gin/fiber)
+	app.InitRouter()
+
+	// Initialize module with dependency injection
+	module.Init(app.Context)
+	// Start server
+	app.ServeHTTP()
+}
+```
+
+### pkg
+
+จะเป็นส่วนโค้ดทั้งหมดของเรา โดยมี
+
+- `app/app.go` เป็นตัว Initialize สิ่งต่างๆ ที่ต้องใช้งาน แล้วเก็บไว้ใน `app.Context` แล้วถึงขั้นตอนการ start server
+- `common` เป็นโค้ดในส่วนที่ต้องใช้งานร่วมกันในหลายๆ ส่วน เช่น การจัดการ error, logging, การทำ pagination และการตอบ response แบบต่างๆ
+- `config` เป็นโค้ดที่ใช้ในการโหลดค่า configuration ([ดูเพิ่มเติม](/blog/go/golang-api-p2-conf))
+  ) ซึ่งตอนในขณะพัฒนาจะโหลดจาก `config.yaml` แต่ในการ deploy ใช้งานจริงจะโหลดจะ system environment
+- `module` เราจะเขียนโมดูลทั้งหมดเอาไว้ที่นี่ โดย `module/module.go` เป็นตัว Initialize โมดูลต่างๆ และแต่ละโมดูลใช้หลักการของ Hexagonal Architecture ในการเขียน ([ดูเพิ่มเติม](/blog/architecture/hexagonal))
+
+<div className="flex justify-center">
+  <div>![hexagonal](/static/images/architecture/hexagonal/sum.png)</div>
+</div>
+
+    - แต่ละโมดูลจะเริ่มที่ `module.go` เป็นโค้ดสำหรับจัดการ depencies ทั้งหมด และสร้าง routers ของโมดูลนั้นๆ
+    - `core` จะเป็นส่วน core หลักของโมดูลนั้น จะประกอบด้วย
+
+    		- `model` โค้ดของ domain model จะอยู่ที่นี้
+    		- `dto` โค้ดที่เกี่ยวกับ dto จะอยู่ที่นี้
+    		- `mapper` เป็นตัว convert ไปมาระหว่าง dto ←→ model
+    		- `ports` เป็นโค้ดส่วน input&output ports ซึ่งก็ คือ `ServiceInterface` และ `RepositoryInterface`
+    		- `service` โค้ดของ application service หรือ input adapter จะอยู่ที่นี้
+
+    - `handler` โค้ดที่เอาไว้จัดการกับ route handler จะอยู่ที่นี้ โดยจะมี dependency คือ input port โดยจะส่ง application service ของเราเข้าไป และเพื่อที่จะให้สามารถรองรับการเปลี่ยน web framework เราจะใช้วิธีสร้าง handler context ขึ้นมาเอง ([ดูเพิ่มเติม](/blog/go/golang-api-p7-handlefunc))
+    - `repository` โค้ดในส่วนของ output adapter ที่ application service ต้องเรียกใช้งาน
+
+- `util` เป็นเก็บโค้ดของ utility functions เช่น การแปลงค่าต่างๆ การเข้ารหัส ถอดหรัส password เป็นต้น
+
+### deploy
+
+เป็นส่วนของ[การสร้าง Dockerfile](/blog/go/golang-api-p6-deploy) และไฟล์สำหรับการ deploy เช่น `docker-compose.yml`
+
+### Makefile
+
+เนื่องจากคำสั่งหลายๆ คำสั่งนั้นยาวมาก ดังนั้นเราจะเขียนไว้ใน Makefile เพื่อความสะดวกในการรันคำสั่งต่างๆ ตัวอย่างเช่น
+
+```makefile
+SERVICE_NAME=Todo-Api
+SERVICE_IMAGE=somprasongd/todo-api
+SERVICE_VERSION=1.0.0
+
+export SERVICE_NAME
+export SERVICE_IMAGE
+export SERVICE_VERSION
+
+dev-up:
+	@echo "---Start Dev $(SERVICE_NAME) Environtment---"
+	docker-compose -p todo-api-dev -f ./deploy/docker-compose.yml -f ./deploy/docker-compose.dev.yml up -d
+
+dev-down:
+	@echo "---Stop Dev $(SERVICE_NAME) Environtment---"
+	docker-compose -p todo-api-dev -f ./deploy/docker-compose.yml -f ./deploy/docker-compose.dev.yml down
+
+dev:
+	@echo "---Start Dev $(SERVICE_NAME)---"
+	go run cmd/api/main.go
+
+d-build:
+	@echo "---Build $(SERVICE_NAME) $(SERVICE_IMAGE):$(SERVICE_VERSION)---"
+	docker build -t $(SERVICE_IMAGE):$(SERVICE_VERSION) -f deploy/Dockerfile .
+
+d-build-debug:
+	@echo "---Build $(SERVICE_NAME) $(SERVICE_IMAGE):$(SERVICE_VERSION)---"
+	docker build --progress plain -t $(SERVICE_IMAGE):$(SERVICE_VERSION) -f deploy/Dockerfile .
+
+prod-up:
+	@echo "---Start Prod $(SERVICE_NAME)---"
+	docker-compose -p task-api-prod -f ./deploy/docker-compose.yml -f ./deploy/docker-compose.prod.yml up -d
+
+prod-down:
+	@echo "---Stop Prod $(SERVICE_NAME)---"
+	docker-compose -p task-api-prod -f ./deploy/docker-compose.yml -f ./deploy/docker-compose.prod.yml down
+```
+
+ซึ่งสามารถดูโค้ดแบบเต็มๆ ได้ที่ [https://github.com/somprasongd/blog-golang/tree/main/goapi-project-structure](https://github.com/somprasongd/blog-golang/tree/main/goapi-project-structure)
