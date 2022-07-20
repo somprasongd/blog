@@ -1,0 +1,207 @@
+---
+title: 'API Service with Go: API Documents'
+date: '2022-07-19'
+lastmod: '2022-07-20'
+tags: ['api', 'go', 'swagger']
+draft: false
+summary: 'สร้าง Swagger 2.0 Api documents'
+---
+
+# API Documents
+
+สิ่งสำคัญอีกอย่างเมื่อเราสร้ง API Service คือ API Document ว่า API ของเราทำงานยังไง มีการรับ Resquest แบบ มี Response หน้าตาเป็นยังไง
+
+ซึ่งที่นิยมใช้กันคือ การสร้าง API Document ด้วย [Swagger](https://swagger.io/) ซึ่งในภาษา Go จะใช้ [https://github.com/swaggo/swag](https://github.com/swaggo/swag) ในการทำ ซึ่งรองรับหลาย web framework
+
+ในบทความนี้จะใช้ [fiber](https://docs.gofiber.io/) ต้องใช้ package [fiber-swagger](https://github.com/swaggo/fiber-swagger) ซึ่งจะเป็น middleware ที่สร้าง API document ด้วย Swagger 2.0 แบบอัตโนมัติ
+
+## การสร้าง Swagger 2.0 Api documents
+
+เราจะใช้โค้ดต่อจาก[บทความที่แล้ว](https://github.com/somprasongd/blog-golang/tree/main/goapi-testing) มาสร้าง Swagger 2.0 Api documents
+
+1. เริ่มจากติดตั้ง [Swag](https://github.com/swaggo/swag)
+
+   ```bash
+   go get github.com/swaggo/swag/cmd/swag
+   ```
+
+2. รัน [Swag](https://github.com/swaggo/swag) เพื่อสร้างไฟล์ที่จำเป็น (`pkg/docs`folder และ `pkg/docs/doc.go`)
+
+   ```bash
+   swag init -g pkg/module/module.go -o pkg/docs
+   ```
+
+3. แก้ไข `module/module.go` เพื่อใช้ middleware ในการ generate doc ui ขึ้นมา
+
+   ```go
+   package module
+
+   import (
+   	// ...
+
+   	fiberSwagger "github.com/swaggo/fiber-swagger"
+   )
+
+   func Init(ctx *app.Context) {
+   	todo.Init(ctx)
+
+   	ctx.Router.Get("/healthz", healthCheckHandler)
+
+   	//Swagger Doc details
+   	host := ctx.Config.Gateway.Host
+   	basePath := ctx.Config.Gateway.BaseURL
+
+   	if len(host) == 0 {
+   		host = fmt.Sprintf("localhost:%v", ctx.Config.Server.Port)
+   	}
+
+   	if len(basePath) == 0 {
+   		basePath = ctx.Config.App.BaseUrl
+   	}
+     // แก้ไขรายละเอียด api doc
+   	docs.SwaggerInfo.Title = "Todo Service API Document"
+   	docs.SwaggerInfo.Description = "List of APIs for Todo Service."
+   	docs.SwaggerInfo.Version = "1.0"
+   	docs.SwaggerInfo.Host = host
+   	docs.SwaggerInfo.BasePath = basePath
+   	docs.SwaggerInfo.Schemes = []string{"https", "http"}
+
+   	//Init Swagger routes
+   	ctx.Router.Get("/swagger/*", fiberSwagger.WrapHandler)
+   }
+
+   func healthCheckHandler(c *fiber.Ctx) error {
+   	return c.SendStatus(http.StatusOK)
+   }
+   ```
+
+4. ทดสอบรัน และเปิด browser ไปที่ [http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html) ก็จะได้ Swagger 2.0 Api documents
+
+<div className="flex justify-center">
+  <div>![Doc](/static/images/go/doc/doc1.png)</div>
+</div>
+
+## ใส่รายละเอียด
+
+เพิ่มรายละเอียดให้แต่ละ endpoints รับ request และตอบกลับ response ยังไง จะใช้วิธีการใส่ comments
+
+```go
+// @Summary        ใช้บอกว่า api เส้นนี้ทำอะไร
+// @Description    ใช้ใส่รายละเอียดแบบยาว
+// @Tags           ใช้กำหนด tag
+// @Accept         ใช้กำหนดรูปแบบ request เช่น json
+// @Produce        ใช้กำหนดรูปแบบ response เช่น json
+// @Param          ใช้กำหนดข้อมูลที่ส่งมา เช่น body ใช้ struct ตัวไหน
+// @Failure        ใช้กำหนด error reponse ทั้ง code และ body ใช้ struct ตัวไหน
+// @Success        ใช้กำหนด success reponse ทั้ง code และ body ใช้ struct ตัวไหน
+// @Router         ใช้กำหนด path และ method
+```
+
+- POST - /api/v1/todos สำหรับสร้างรายการใหม่
+
+```go
+// @Summary Add a new todo
+// @Description Add a new todo
+// @Tags Todo
+// @Accept  json
+// @Produce  json
+// @Param todo body swagger.CreateTodoFrom true "Todo Data"
+// @Failure 422 {object} swagdto.Error422
+// @Failure 500 {object} swagdto.Error500
+// @Success 201 {object} swagdto.Response{data=swagger.TodoSampleData}
+// @Router /todos [post]
+func (h TodoHandler) CreateTodo(c common.HContext) error {
+	// ...
+}
+```
+
+- GET - /api/v1/todos สำหรับค้นหารายการทั้งหมด
+
+```go
+// @Summary List all existing todos
+// @Description You can filter all existing todos by listing them.
+// @Tags Todo
+// @Accept  json
+// @Produce  json
+// @Param term query string false "filter the text based value (ex: term=dosomething)"
+// @Param completed query bool false "filter the status based value (ex: completed=true)"
+// @Param page query int false "Go to a specific page number. Start with 1"
+// @Param limit query int false "Page size for the data"
+// @Param order query string false "Page order. Eg: text desc,createdAt desc"
+// @Failure 422 {object} swagdto.Error422
+// @Failure 500 {object} swagdto.Error500
+// @Success 200 {object} swagdto.ResponseWithPage{data=swagger.TodoSampleListData}
+// @Router /todos [get]
+func (h TodoHandler) ListTodo(c common.HContext) error {
+  // ...
+}
+```
+
+- GET - /api/v1/todos/:id สำหรับค้นหารายการจาก id ที่ระบุ
+
+```go
+// @Summary Get a todo
+// @Description Get a specific todo by id
+// @Produce json
+// @Tags Todo
+// @Param id path string true "Todo ID"
+// @Failure 400 {object} swagdto.Error400
+// @Failure 404 {object} swagdto.Error404
+// @Failure 500 {object} swagdto.Error500
+// @Success 200 {object} swagdto.Response{data=swagger.TodoSampleData}
+// @Router /todos/{id} [get]
+func (h TodoHandler) GetTodo(c common.HContext) error {
+  // ...
+}
+```
+
+- PATCH - /api/v1/todos/:id สำหรับอัพเดทสถานะ รายการจาก id ที่ระบุ
+
+```go
+// @Summary Update a todo status
+// @Description Update a specific todo status by id
+// @Produce json
+// @Tags Todo
+// @Param id path string true "Todo ID"
+// @Param todo body swagger.UpdateTodoStatusForm true "Todo Status Data"
+// @Failure 400 {object} swagdto.Error400
+// @Failure 404 {object} swagdto.Error404
+// @Failure 500 {object} swagdto.Error500
+// @Success 200 {object} swagdto.Response{data=swagger.TodoSampleData}
+// @Router /todos/{id} [patch]
+func (h TodoHandler) UpdateTodoStatus(c common.HContext) error {
+  // ...
+}
+```
+
+- DELETE - /api/v1/todos/:id สำหรับลบรายการจาก id ที่ระบุ
+
+```go
+// @Summary Delete a todo
+// @Description Delete a specific todo by id
+// @Produce  json
+// @Tags Todo
+// @Param id path string true "Todo ID"
+// @Failure 400 {object} swagdto.Error400
+// @Failure 404 {object} swagdto.Error404
+// @Failure 500 {object} swagdto.Error500
+// @Success 204
+// @Router /todos/{id} [delete]
+func (h TodoHandler) DeleteTodo(c common.HContext) error {
+  // ...
+}
+```
+
+- รันคำสั่ง ให้ generate `pkg/docs/doc.go` ใหม่ จาก comments ที่เพิ่มเข้าไป
+
+```bash
+swag init -g pkg/module/module.go -o pkg/docs
+```
+
+- และเปิด browser ไปที่ [http://localhost:8080/swagger/index.html](http://localhost:8080/swagger/index.html) ก็จะเห็นว่ามีการอัพเดทแล้ว
+
+<div className="flex justify-center">
+  <div>![Doc](/static/images/go/doc/doc2.png)</div>
+</div>
+
+สามารถดูโค้ดทั้งหมดได้[ที่นี่](https://github.com/somprasongd/blog-golang/tree/main/goapi-doc)
