@@ -1,0 +1,330 @@
+---
+title: 'What is Authentication and Authorization?'
+date: '2022-07-25'
+lastmod: '2022-07-25'
+tags: ['authentication', 'typescript', 'nodejs']
+draft: false
+summary: 'Authentication และ Authorization คือ การป้องกันการเข้าถึงทรัพยากรในเซิฟเวอร์ของเรา'
+---
+
+ในการพัฒนา API Service นั้น เราจำเป็นต้องมีการป้องกันการเข้าถึงทรัพยากรในเซิฟเวอร์ของเราด้วย ซึ่งจะมีการทำอยู่ 2 อย่าง คือ
+
+- **Authentication** คือ การยืนยันว่าตัวตนว่าเป็นใคร
+- **Authorization** คือ การตรวจสอบสิทธิ์การเข้าถึงทรัพยากรในเซิฟเวอร์ว่าสามารถเข้าใช้ได้ หรือไม่
+
+## Authentication
+
+ในการยืนยันตัวตนว่าเป็นใครนั้นจะมีหลักการทำ คือ
+
+- **Sign-up API** คือ การลงทะเบียนผู้ใช้งาน หลักๆ ก็จะมี username กับ password ส่งมาให้ Autentication Service เพื่อสร้างผู้ใช้งานใหม่ขึ้นมา
+- **Sign-in API** คือ การให้ผู้ใช้งานยืนยันตัวตนก่อนที่จะเข้ามาใช้งาน โดยจะต้องส่ง username และ password มาตรวจสอบ ถ้าถูกต้องจะส่งอะไรบ้างอย่างไปให้ client เพื่อใช้ค่านี้แทน เพื่อไม่ต้อง login ทุกครั้ง โดยจะนิยมใช้ JSON Web Token (JWTs) โดยจะสร้าง token ขึ้นมา 2 ตัว คือ
+  - **Refresh Token**: เป็น JWTs ที่มีอายุยาวๆ ใช้ในการสร้าง Access Token ใหม่
+  - **Access Token**: เป็น JWTs ที่มีอายุสั้นๆ เช่น 5 นาที ใช้ส่งไปกับทุกการเรียกใช้ API Service อื่นๆ เพื่อเป็นตัวแทนว่าคือใคร
+    {' '}
+    <aside>
+      💡 การใช้ JSON Web Token (JWT) มีรูปแบบ `header.payload.signature` ซึ่ง payload
+      จะต้องไม่ส่งอะไรที่เป็นความลับออกไป ส่วนใหญ่ที่ส่งออกไป - sub → Subject เช่น ส่วนใหญ่จะใส่
+      userId - iat → Issued At เป็น unix timestamp ที่สร้าง token - exp → Expiry เป็น unix timestamp
+      ที่ token นี้หมดอายุ - iss → Issuer The issuer of the token
+    </aside>
+    โดย client จะต้องเก็บค่า token ทั้งสองนี้เอาไว้ และครั้งถัดไป client จะต้องส่ง access token ไปด้วยทุกครั้ง
+- **Sign-out API** คือ การส่ง Refresh Token มาให้ Authentication Service เพื่อลบออกจากฐานข้อมูล ก็จะทำให้ไม่สามารถใช้งาน Token นี้ได้อีกต่อไป
+- **Refresh API** คือ การส่ง Refresh Token มาให้ Authentication Service สร้าง Access Token ใหม่
+- **Authentication Middleware** เป็น middleware ที่เอาวางไว้ในทุก routes ที่ต้องการยืนยันตัวตนก่อนเข้าใช้งาน โดยตัวมันจะทำหน้าที่ ตรวจสอบ access token ที่ส่งเข้ามา ว่าถูกต้องหรือไม่
+  - ถ้าถูกต้องจะดึงเอาข้อมูลผู้ใช้งานส่งต่อไปให้ handler ของ route นั้นๆ ต่อไป
+  - ถ้าไม่ถูกต้องจะไม่อนุญาตให้เข้าใช้งาน route นั้นๆ
+- **Profile API** คือ การส่ง Access Token มาให้ Authentication Service เพื่อดึงเอาข้อมูลผู้ใช้ตอบกลับไป หรือใช้ในการแก้ไขข้อมูลส่วนตัวโดยผู้ใช้งานเอง
+
+### Sign-up API
+
+_ตัวอย่างโค้ดในบทความนี้จะใช้ [Node.js (TypeScript)](https://somprasongd.work/blog/nodejs/nodejs-ts-setup)_
+
+การทำ sign-up api นั้น จะส่ง username และ password เข้ามา เพื่อบันทึกเก็บไว้ในฐานข้อมูล โดยเราจะต้องทำการ [hash password](https://somprasongd.work/blog/storing-password) ก่อนเก็บด้วยทุกครั้ง
+
+```tsx
+signup = async (req: Request, res: Response) => {
+  const { email, password } = req.body
+
+  const hash = await passUtil.hash(password)
+
+  await this.db.user.create({
+    data: {
+      email,
+      password: hash,
+    },
+  })
+
+  res.sendStatus(201)
+}
+```
+
+### Sign-in API
+
+จะส่ง username และ password เข้ามา เพื่อทำการตรวจสอบ ถ้าถูกต้องจะได้ข้อมูลของผู้ใช้งาน กับ Refresh Token และ Accress Token ตอบกลับไป
+
+- เริ่มจากเอา username ไปค้นหาจากฐานข้อมูล
+
+```tsx
+signin = async (req: Request, res: Response) => {
+  const { email, password } = req.body
+
+  // 1. find user from email
+  const user = await this.db.user.findFirst({ where: { email } })
+  if (!user) {
+    res.sendStatus(404)
+    return
+  }
+}
+```
+
+- เอา password ไปเทียบกับที่เข้ารหัสเก็บไว้
+
+```tsx
+signin = async (req: Request, res: Response) => {
+  const { email, password } = req.body
+
+  // 1. find user from email
+  // 2. verify password
+  const ok = await passUtil.verify(user.password, password)
+  if (!ok) {
+    res.sendStatus(401)
+    return
+  }
+}
+```
+
+- สร้าง refresh token โดยมี payload เป็น tokenId โดยจะเก็บเอาไว้ในฐานข้อมูลพร้อมวันหมดอายุ เพื่อใช้สร้าง access token และการ sign out
+
+```tsx
+signin = async (req: Request, res: Response) => {
+  const { email, password } = req.body
+
+  // 1. find user from email
+  // 2. verify password
+  // 3. create refresh token and save to db
+  const tokenId = generateTokenId()
+  const refresh = generateRefreshToken({ sub: tokenId })
+  await this.db.token.create({
+    data: {
+      userId: user.id,
+      token: tokenId,
+      expiredAt: <Date>refresh.expiredAt,
+    },
+  })
+}
+```
+
+- สร้าง access token โดยในตัวอย่างนี้จะแนบข้อมูล user (id, role) ไปใน payload
+
+```tsx
+signin = async (req: Request, res: Response) => {
+  const { email, password } = req.body
+
+  // 1. find user from email
+  // 2. verify password
+  // 3. create refresh token and save to db
+  // 4. create access token with user info
+  const access = generateAcceesToken({
+    sub: user.id,
+    role: user.role,
+  })
+}
+```
+
+- เสร็จแล้วส่งข้อมูล userInfo, refresh token, access token ตอบกลับไป
+
+```tsx
+signin = async (req: Request, res: Response) => {
+  const { email, password } = req.body
+
+  // 1. find user from email
+  // 2. verify password
+  // 3. create refresh token and save to db
+  // 4. create access token with user info
+  // 5. send AuthResponse
+  const authResp: AuthResponse = {
+    user: {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    },
+    refresh: {
+      token: refresh.token,
+      expiredAt: <Date>refresh.expiredAt,
+    },
+    access: {
+      token: access.token,
+      expiredAt: <Date>access.expiredAt,
+    },
+  }
+  res.json(authResp)
+}
+```
+
+<aside>
+💡 Client จะต้องเก็บ tokenไว้ และครั้งถัดๆ ไป ที่ client เรียกเข้ามาจะต้องส่ง access token ไปด้วยทุกครั้ง โดย server จะตรวจสอบว่าถูกต้องหรือไม่จาก signature แล้วเอา userId จาก sub ไปใช้งานต่อได้เลย หรือเอาไปค้นหา user ออกมา เมื่อรูปว่า user คือใคร ก็จะสามารถทำการ Authorization เพื่อตรวจสอบสิทธิต่อได้
+
+</aside>
+
+### Sign-out API
+
+จะส่ง refresh token เข้ามา เพื่อทำการลบออกจากฐานข้อมูล ซึ่งจะทำให้ไม่สามารถใช้ refresh token นี้ในการออก access token ใหม่ได้
+
+```tsx
+signout = async (req: Request, res: Response) => {
+  const { refreshToken } = req.body
+
+  const decode = decodeToken(refreshToken)
+  if (decode === null) {
+    res.sendStatus(404)
+    return
+  }
+
+  await this.db.token.delete({
+    where: {
+      token: <string>decode.sub,
+    },
+  })
+
+  res.sendStatus(204)
+}
+```
+
+### Resfresh API
+
+เป็นการส่ง refresh token มาตรวจสอบ ถ้ายังมีในฐานข้อมูล และยังไม่หมดอายุ ก็จะทำการออก access token ตัวใหม่ ตอบกลับไป
+
+```tsx
+refresh = async (req: Request, res: Response) => {
+  const { refreshToken } = req.body
+  try {
+    const decode = verifyRefreshToken(refreshToken)
+    const token = await this.db.token.findFirst({
+      where: {
+        token: <string>decode.sub,
+        expiredAt: { gt: new Date() },
+      },
+      include: {
+        user: true,
+      },
+    })
+
+    if (!token) {
+      return res.sendStatus(401)
+    }
+
+    const access = generateAcceesToken({ sub: token.user?.id, role: token.user?.role })
+
+    res.json(access)
+  } catch (error) {
+    res.sendStatus(401)
+  }
+}
+```
+
+### Middleware Authentication
+
+สำหรับการตรวจสอบว่าผู้ใช้งานได้ทำการ login มาแล้วรึยังนั้น เราจะต้องเขียนตรวจสอบในทุกๆ router controller ที่ทำการป้องกันเอาไว้ ดังนั้นเราสามารถนำโค้ดส่วนนี้ออกมาเป็น middleware แล้วเอาไปวางไปก่อนให้ route controller นั่นๆ ทำงานแทนได้ ซึ่งถ้าตรวจสอบผ่านจะทำการแนบ user object ไปกับ req object เพื่อให้ controller นำไปใช้งานต่อได้
+
+```tsx
+export const authentication = (req: Request, res: Response, next: NextFunction) => {
+  const authorization = req.header('Authorization')?.split(' ')
+  // 'Access denied. No token provided.'
+  if (!authorization) return res.sendStatus(401)
+  // 'Access denied. Invalid token.'
+  if (authorization[0] !== 'Bearer') return res.sendStatus(401)
+
+  try {
+    const decoded = verifyAccessToken(authorization[1])
+    console.log(decoded)
+
+    // eslint-disable-next-line prettier/prettier
+    const { sub: id, role } = decoded as {
+      sub: string
+      role: string
+    }
+    req.user = { id, role }
+    next()
+  } catch (ex) {
+    // 'Access denied. Invalid token.'
+    res.sendStatus(401)
+  }
+}
+```
+
+### Profile API
+
+เป็นการส่ง access token เข้ามา เพื่อดึงเอาข้อมูลผู้ใช้งานกลับไป โดยจะใช้ร่วมกับ authentication middleware เพื่อยืนยันตัวตนก่อน
+
+```tsx
+// auth api router
+router.get('/profile', authentication, ctrl.profile)
+
+// auth api controller
+profile = async (req: Request, res: Response) => {
+  const { id } = req.user
+  const user = await this.db.user.findFirst({ where: { id: +id } })
+
+  res.json({
+    id: user?.id,
+    email: user?.email,
+    role: user?.role,
+  })
+}
+```
+
+## Authorization
+
+การตรวจสอบสิทธิ์การเข้าถึงทรัพยากรในเซิฟเวอร์ สามารถทำได้หลายวิธี โดยในบทความนี้ใช้วิธีตรวจสอบสิทธิแบบ Role base หรือก็คือการกำหนดว่าในแต่ละ routes นั้น อนุญาตให้ผู้ใช้งานที่มี role ตามที่กำหนดเท่านั้น ถึงจะเข้าใช้งานได้
+
+ซึ่งทำได้โดยการเพิ่มโค้ดการตรวจสอบ role เข้าไปในทุกๆ route handler นั้นเอง เช่น การค้นหา users ต้องเป็นผู้ใช้งานสิทธิ admin เท่านั้น
+
+```tsx
+list = async (req: Request, res: Response) => {
+  if (req.user.role !== 'admin') {
+    return res.sendStatus(403)
+  }
+
+  const users = await this.db.user.findMany()
+
+  const serailizeUsers = users.map((user) => {
+    return {
+      id: user.id,
+      email: user.email,
+      role: user.role,
+    }
+  })
+
+  res.json(serailizeUsers)
+}
+```
+
+แต่เราสามารถเอาโค้ดส่วนนี้ออกมาเขียนไว้ใน middleware แทนได้ ดังนี้
+
+```tsx
+export const authorization = (req: Request, res: Response, next: NextFunction) => {
+  if (req.user.role !== 'admin') {
+    return res.sendStatus(403)
+  }
+  next()
+}
+```
+
+และเอา middleware ไปเรียกใช้หลังการทำ authentication
+
+```tsx
+export const registerRoutes = ({ app, baseUrl, db }: RouterConfig) => {
+  const ctrl = new UserController(db)
+
+  const router = express.Router()
+
+  router.post('/', authentication, authorization, ctrl.create)
+  router.get('/', authentication, authorization, ctrl.list)
+
+  app.use(baseUrl + '/users', router)
+}
+```
+
+เพียงเท่านี้เราก็จะได้การทำ Authorization แบบ Role Base แล้ว
+
+โค้ดทั้งหมดดูได้[ที่นี่](https://github.com/somprasongd/ts-auth)
