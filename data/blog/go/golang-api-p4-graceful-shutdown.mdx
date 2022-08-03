@@ -1,7 +1,7 @@
 ---
 title: 'API Service with Go: Graceful Shutdown'
 date: '2022-02-04'
-lastmod: '2022-07-18'
+lastmod: '2022-07-27'
 tags: ['api', 'go']
 draft: false
 summary: 'รอให้งานที่กำลังทำงานค้างอยู่นั้น ทำงานให้เสร็จก่อน ถึงจะ shutdown ระบบไป'
@@ -13,49 +13,46 @@ Graceful Shutdown คือ การรอให้งานที่กำล�
 
 ### แล้วทำอย่างไร
 
-มาทำความเข้า API Server กันก่อนว่าทำงานยังไง เนื่องจากการที่จะสามารถรับหลายๆ request ได้ในเวลาเดียวกันนั้น จำเป็นที่จะต้องให้แต่ละ request ทำงานแบบ goroutine ซึ่งแยก thread การทำงานออกไป ทำให้เมื่อสั่งหยุดการทำงาน server ซึ่งเป็น main thread จะทำให้ goroutine ทุกตัวถูกหยุดการทำงานลงไปด้วย
+มาทำความเข้า API Server กันก่อนว่าทำงานยังไง เนื่องจากการที่จะทำให้ server สามารถรับได้หลายๆ request ในเวลาเดียวกันนั้น จะต้องทำให้แต่ละ request ทำงานแบบ goroutine คือแยก thread การทำงานออกไป
 
-เราจะมาแก้ตรงนี้ คือ เมื่อได้รับ signal ที่ถูกส่งเข้ามาสั่งให้หยุดการทำงาน เราจะต้องทำ 2 อย่าง คือ
+สิ่งที่เกิดขึ้นเมื่อสั่งให้ server ที่เป็น main thread หยุดการทำงาน คือ goroutine ทุกตัว จะถูกหยุดการทำงานลงไปด้วย
 
-1. เริ่มจากหยุดรับ request เพิ่ม
-2. รอให้งานเดิมทำงานให้เสร็จก่อน
+ดังนั้น ที่ต้องแก้ คือ ต้องรอให้ goroutine ทุกตัวทำงานให้เสร็จก่อน ซึ่งมีขั้นตอนดังนี้
 
-แล้วจึงจะ shutdown service ได้
+1. รอรับ signal ที่ถูกส่งเข้ามาสั่งให้หยุดการทำงาน
+2. หลังได้รับ signal ให้เริ่มจากหยุดรับ request เพิ่ม
+3. รอให้งานเดิมทำงานให้เสร็จก่อน
+4. Clean up resources ทั้งหมดที่สร้างขึ้นมา เช่น database connection และ redis connection
 
-<aside>
-💡 signal ที่จะถูกส่งเข้ามาเพื่อสั่งให้หยุดการทำงาน
-- `SIGINT` สัญญาณ interrupt เช่น กด ctrl+c
-- `SIGTERM` เช่น สั่งหยุด pod จาก kubernates
+แล้วจึงจะหยุดการทำงานของโปรแกรมได้
 
-</aside>
+### ตัวอย่าง Web Server
 
-### ตัวอย่างโค้ด
+ตัวอย่าง web server โดยใช้ http
 
 ```go
 package main
 
 import (
-    "context"
-    "flag"
-    "log"
-    "net/http"
-    "os"
-    "os/signal"
-    "time"
+	"fmt"
+	"log"
+	"net/http"
+	"time"
 
-    "github.com/gorilla/mux"
+	"github.com/gorilla/mux"
 )
 
 func main() {
-    var wait time.Duration
-    flag.DurationVar(&wait, "graceful-timeout", time.Second * 15, "the duration for which the server gracefully wait for existing connections to finish - e.g. 15s or 1m")
-    flag.Parse()
+	r := mux.NewRouter()
+	// Add your routes as needed
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "OK")
+	}).Methods("GET")
 
-    r := mux.NewRouter()
-    // Add your routes as needed
-
-    srv := &http.Server{
-		Addr: "0.0.0.0:8080",
+	port := 8080
+	srv := &http.Server{
+		Addr: fmt.Sprintf("0.0.0.0:%v", port),
 		// Good practice to set timeouts to avoid Slowloris attacks.
 		WriteTimeout: time.Second * 15,
 		ReadTimeout:  time.Second * 15,
@@ -63,33 +60,425 @@ func main() {
 		Handler:      r, // Pass our instance of gorilla/mux in.
 	}
 
-	// Run our server in a goroutine so that it doesn't block.
-	go func() {
-		if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-			log.Fatal(err)
-		}
-	}()
-
-	// Create channel to listen for signals.
-	signalChan := make(chan os.Signal, 1)
-	// Accept graceful shutdowns when quit via SIGINT (Ctrl+C) or SIGTERM
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Block until receive signal.
-	sig := <-signalChan
-	log.Printf("%s signal caught", sig)
-
-	// Create a deadline to wait for.
-	ctx, cancel := context.WithTimeout(context.Background(), wait)
-	defer cancel()
-
-	// Add extra handling here to clean up resources, such as flushing logs and
-	// closing any database or Redis connections.
-
-	// Gracefully shutdown the server by waiting on existing requests (except websockets).
-	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("server shutdown failed: %+v", err)
+	log.Printf("Starting server at port %v\n", port)
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatal(err)
 	}
-	log.Print("server exited")
 }
 ```
+
+## รอรับ Signal
+
+Signal ที่จะถูกส่งเข้ามาเพื่อสั่งให้หยุดการทำงาน จะมี 2 ตัวคือ
+
+- **SIGINT** สัญญาณ interrupt เช่น กด Ctrl+c
+- **SIGTERM** เช่น สั่งหยุด pod จาก Kubernates
+
+โดยจะเพิ่ม goroutine เข้ารอรับ signal ก่อน start server
+
+```go
+func main() {
+  // ...
+
+  go gracefulShutdown()
+
+	log.Printf("Starting server at port %v\n", port)
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func gracefulShutdown() {
+	// Listen for syscall signals for process to interrupt/quit
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	s := <-sig
+	log.Printf("Received %v signal", s)
+	os.Exit(0)
+}
+```
+
+เมื่อกด Ctrl+c จะแสดงข้อความ `Receive interrupt signal` แสดงว่าทำงานได้ถูกต้อง
+
+## หยุดรับ Request และรอให้ทำงานเดิมเสร็จ
+
+เมื่อได้รับ signal มาแล้ว ให้เราสั่งให้ server หยุด request ใหม่ และรอให้ request ที่รับเข้ามาแล้วทำงานให้เสร็จก่อน โดยเพิ่มโค้ดตามนี้
+
+```go
+func main() {
+	// ...
+
+	go gracefulShutdown(srv)
+
+	log.Printf("Starting server at port %v\n", port)
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Server shutdown successed")
+}
+
+func gracefulShutdown(srv *http.Server) {
+	// Listen for syscall signals for process to interrupt/quit
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	s := <-sig
+	log.Printf("Received %v signal", s)
+
+	err := srv.Shutdown(context.Background())
+	if err != nil {
+		log.Fatalf("Server shutdown failed: %+v\n", err)
+	}
+}
+```
+
+แต่เมื่อกด Ctrl+c จะพบว่าไม่แสดงข้อความ `Server shutdown successed` แต่กลับได้ error ว่า `http: Server closed` มาแทน เราจะต้องแก้โค้ดให้ตรวจสอบว่าไม่ใช่ error นี้ ถึงจะ panic ออกมา
+
+```go
+func main() {
+	// ...
+
+	go gracefulShutdown(srv)
+
+	log.Printf("Starting server at port %v\n", port)
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+}
+```
+
+เมื่อลองดูใหม่ จะไม่มี error แล้ว ก็ยังไม่ได้ข้อความ `Server shutdown successed` แก้โดยให้ส่ง `chan struct{}` เข้าไป และรอรับว่าฟังก์ชัน gracefulShutdown นั้นทำงานเสร็จแล้ว
+
+```go
+func main() {
+	// ...
+
+	serverShutdown := make(chan struct{})
+
+	go gracefulShutdown(srv, serverShutdown)
+
+	log.Printf("Starting server at port %v\n", port)
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+	<-serverShutdown
+
+	log.Println("Server shutdown successed")
+}
+
+func gracefulShutdown(srv *http.Server, serverShutdown chan struct{}) {
+	// Listen for syscall signals for process to interrupt/quit
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	s := <-sig
+	log.Printf("Received %v signal...", s)
+
+	err := srv.Shutdown(context.Background())
+	if err != nil {
+		log.Fatalf("Server shutdown failed: %+v\n", err)
+	}
+	serverShutdown <- struct{}{}
+}
+```
+
+## Clean up resources
+
+สุดท้ายเราต้องคืน resources ที่สร้างไว้ทั้งหมด เช่น พวก database หรือ redis connection โดยให้ทำหลังจากฟังก์ชัน `gracefulShutdown` ทำงานเสร็จแล้ว
+
+```go
+func main() {
+	// ...
+
+	go gracefulShutdown(srv)
+
+	log.Printf("Starting server at port %v\n", port)
+	if err := srv.ListenAndServe(); err != nil {
+		log.Fatal(err)
+	}
+	log.Println("Server shutdown successed")
+  log.Println("Running cleanup tasks")
+	// Add extra handling here to clean up resources, such as flushing logs and
+	// closing any database or Redis connections.
+}
+```
+
+## Shutdown timeout
+
+ในการรอให้ Server shutdown เราควรกำหนด timeout ไว้ด้วย ซึ่งสามารถทำได้ ตามนี้
+
+```go
+func main() {
+	var timeout time.Duration
+	flag.DurationVar(&timeout, "graceful-timeout", time.Second*15, "the duration for which the server gracefully wait for existing connections to finish - e.g. 15s or 1m")
+	flag.Parse()
+
+	// ...
+
+	log.Printf("Starting server at port %v\n", port)
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+
+	select {
+	case <-serverShutdown:
+		log.Println("Shutdown completed")
+	case <-time.After(timeout):
+		log.Println("Shutdown timeout")
+	}
+
+	log.Println("Running cleanup tasks")
+	// Your cleanup tasks go here
+}
+```
+
+ลองทดสอบโดยการ เพิ่ม `time.Sleep(20 * time.Second)` เข้าไป
+
+```diff
+func gracefulShutdown(srv *http.Server, serverShutdown chan struct{}) {
+	// Listen for syscall signals for process to interrupt/quit
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	s := <-sig
+	log.Printf("Received %v signal...", s)
+
+	err := srv.Shutdown(context.Background())
+	if err != nil {
+		log.Fatalf("Server shutdown failed: %+v\n", err)
+	}
++	time.Sleep(20 * time.Second)
+	serverShutdown <- struct{}{}
+}
+```
+
+จะแสดงข้อความ `Shutdown timeout` และเข้าสู่ขั้นตอน Clean up ต่อไป
+
+## ตัวอย่างโค้ดทั้งหมด
+
+```go
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gorilla/mux"
+)
+
+func main() {
+	var timeout time.Duration
+	flag.DurationVar(&timeout, "graceful-timeout", time.Second*15, "the duration for which the server gracefully wait for existing connections to finish - e.g. 15s or 1m")
+	flag.Parse()
+
+	r := mux.NewRouter()
+	// Add your routes as needed
+	r.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintf(w, "OK")
+	}).Methods("GET")
+
+	port := 8080
+	srv := &http.Server{
+		Addr: fmt.Sprintf("0.0.0.0:%v", port),
+		// Good practice to set timeouts to avoid Slowloris attacks.
+		WriteTimeout: time.Second * 15,
+		ReadTimeout:  time.Second * 15,
+		IdleTimeout:  time.Second * 60,
+		Handler:      r, // Pass our instance of gorilla/mux in.
+	}
+
+	serverShutdown := make(chan struct{})
+
+	go gracefulShutdown(srv, serverShutdown)
+
+	log.Printf("Starting server at port %v\n", port)
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+
+	select {
+	case <-serverShutdown:
+		log.Println("Shutdown completed")
+	case <-time.After(timeout):
+		log.Println("Shutdown timeout")
+	}
+
+	log.Println("Running cleanup tasks")
+	// Your cleanup tasks go here
+}
+
+func gracefulShutdown(srv *http.Server, serverShutdown chan struct{}) {
+	// Listen for syscall signals for process to interrupt/quit
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	s := <-sig
+	log.Printf("Received %v signal...", s)
+
+	err := srv.Shutdown(context.Background())
+	if err != nil {
+		log.Fatalf("Server shutdown failed: %+v\n", err)
+	}
+
+	serverShutdown <- struct{}{}
+}
+```
+
+## ตัวอย่างโค้ดสำหรับ Gin framework
+
+<aside>
+💡 สำหรับ framework ที่ใช้ http.Server สามารถใช้วิธีเดียวกันได้ทั้งหมด
+
+</aside>
+
+```go
+package main
+
+import (
+	"context"
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	var timeout time.Duration
+	flag.DurationVar(&timeout, "graceful-timeout", time.Second*15, "the duration for which the server gracefully wait for existing connections to finish - e.g. 15s or 1m")
+	flag.Parse()
+
+	r := gin.Default()
+	// Add your routes as needed
+	r.GET("/", func(ctx *gin.Context) {
+		msg := "ok"
+		ctx.Data(http.StatusOK, "text/plain", []byte(msg))
+	})
+
+	port := 8080
+	srv := &http.Server{
+		Addr: fmt.Sprintf("0.0.0.0:%v", port),
+		// Good practice to set timeouts to avoid Slowloris attacks.
+		WriteTimeout: time.Second * 15,
+		ReadTimeout:  time.Second * 15,
+		IdleTimeout:  time.Second * 60,
+		Handler:      r, // Pass our instance of gorilla/mux in.
+	}
+
+	serverShutdown := make(chan struct{})
+
+	go gracefulShutdown(srv, serverShutdown)
+
+	log.Printf("Starting server at port %v\n", port)
+	if err := srv.ListenAndServe(); err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+
+	select {
+	case <-serverShutdown:
+		log.Println("Shutdown completed")
+	case <-time.After(timeout):
+		log.Println("Shutdown timeout")
+	}
+
+	log.Println("Running cleanup tasks")
+	// Your cleanup tasks go here
+}
+
+func gracefulShutdown(srv *http.Server, serverShutdown chan struct{}) {
+	// Listen for syscall signals for process to interrupt/quit
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	s := <-sig
+	log.Printf("Received %v signal...", s)
+
+	err := srv.Shutdown(context.Background())
+	if err != nil {
+		log.Fatalf("Server shutdown failed: %+v\n", err)
+	}
+
+	serverShutdown <- struct{}{}
+}
+```
+
+## ตัวอย่างโค้ดสำหรับ Fiber framework
+
+เนื่องจาก fiber framework ไม่ได้ใช้ http.Server ดังนั้น การสั่ง shutdown จะต่างไป โดยไม่ต้องส่ง `context.Background()` เข้าไป
+
+```go
+package main
+
+import (
+	"flag"
+	"fmt"
+	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+func main() {
+	var timeout time.Duration
+	flag.DurationVar(&timeout, "graceful-timeout", time.Second*15, "the duration for which the server gracefully wait for existing connections to finish - e.g. 15s or 1m")
+	flag.Parse()
+
+	app := fiber.New()
+
+	app.Get("/", func(c *fiber.Ctx) error {
+		return c.SendString("ok")
+	})
+
+	serverShutdown := make(chan struct{})
+
+	go gracefulShutdown(app, serverShutdown)
+
+	// Run the server
+	port := 8080
+	log.Printf("Starting server at port %v\n", port)
+
+	err := app.Listen(fmt.Sprintf("0.0.0.0:%v", port))
+	if err != nil && err != http.ErrServerClosed {
+		panic(err.Error())
+	}
+
+	select {
+	case <-serverShutdown:
+		log.Println("Shutdown completed")
+	case <-time.After(timeout):
+		log.Println("Shutdown timeout")
+	}
+
+	// <-serverShutdown
+	log.Println("Running cleanup tasks")
+	// Your cleanup tasks go here
+}
+
+func gracefulShutdown(srv *fiber.App, serverShutdown chan struct{}) {
+	// Listen for syscall signals for process to interrupt/quit
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+	s := <-sig
+	log.Printf("Received %v signal...", s)
+
+	err := srv.Shutdown()
+	if err != nil {
+		log.Fatalf("Server shutdown failed: %+v\n", err)
+	}
+	serverShutdown <- struct{}{}
+}
+```
+
+สามารถดูโค้ดทั้งหมดได้[ที่นี่](https://github.com/somprasongd/blog-golang/tree/main/goapi-graceful-shutdown)
