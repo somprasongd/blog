@@ -1,0 +1,990 @@
+---
+title: 'API Service with Go: Authentication with JWT'
+date: '2022-08-02'
+lastmod: '2022-08-03'
+tags: ['authentication', 'jwt' 'go']
+draft: false
+summary: 'ป้องกันการเข้าถึงทรัพยากรบนเซิร์ฟเวอร์ด้วย JWT Token'
+---
+
+# Authentication with JWT
+
+ในการทำ API Service แบบ private เราจำเป็นต้องป้องกันการเข้าถึงด้วย เช่น ต้องให้ผู้ใช้งานทำการ login ก่อนเข้าใช้งาน
+
+แต่ถ้าต้องทำการ login ใหม่ทุกครั้ง คงไม่ดีแน่ ดังนั้นเมื่อทำการ login สำเร็จ เราจะสร้างอะไรบางอย่างส่งกลับไปให้ Client ด้วย เช่น ใช้ token และทุกครั้งที่จะเรียกใช้งาน API จะให้ client จะต้องส่ง token มาด้วย แทนการ login
+
+## JWT Token
+
+Token ที่นิยมใช้กันรูปแบบหนึ่ง คือ [JWT](https://somprasongd.work/blog/nodejs/nodejs-jwt) ซึ่งประกอบด้วย 3 ส่วน แบ่งด้วย dots (.)
+
+รูปแบบ **`HEADER.PAYLOAD.SIGNATURE`**
+
+- **HEADER** เป็นส่วนที่บอกว่าเป็นชนิดอะไร (**`typ`**) และมี hashing algorithm (**`alg`**)เป็นอะไร เช่น HMAC SHA256 หรือ RSA แล้วเอามาเข้ารหัสแบบ Base64 เอาไว้
+
+```json
+{
+  "typ": "JWT",
+  "alg": "HS256"
+}
+```
+
+- **PAYLOAD** เป็นส่วนที่เอาไว้เก็บ claims ซึ่งคือส่วนของข้อมูลทั่วไป หรือข้อมูล user จะถูกเข้ารหัสแบบ Base64 เอาไว้ ซึ่งมัน decode กลับมาได้ ดังนั้นไม่ควรใส่ข้อมูลที่เป็นความลับ เช่น รหัสผ่าน หรือ key ต่างๆ
+
+```json
+{
+  "sub": "1234567890",
+  "name": "John Doe",
+  "admin": true
+}
+
+*// predefined keys*
+- sub (Subject) คือ identifier ของ token นี้ ส่วนใช้ userId
+- iat (Issued At) คือ สร้าง token นี้เมื่อไหร่ รูปแบบ unix timestamp
+- exp (Expiry) คือ token หมดอายุเมื่อไหร่ รูปแบบ unix timestamp
+- iss (Issuer) คือ ใคร้เป็นสร้าง token นี้
+```
+
+- **SIGNATURE** เป็นการเอา encoded header, encoded payload และ secret มาเข้ารหัสด้วย algorithm ที่ระบุอยู่ใน header ซึ่งถ้ามีการแก้ไข `HADER` หรือ `PAYLOAD` จะทำให้ค่าออกมาไม่ตรงกับ `SIGNATURE` เดิม JWT ก็จะ invald
+
+```
+HMACSHA256(base64UrlEncode(header) + '.' + base64UrlEncode(payload), secret)
+```
+
+สุดท้ายเอาทั้ง 3 ส่วนมาต่อกัน **`HEADER.PAYLOAD.SIGNATURE`** ก็จะได้ JWT
+
+```
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.
+eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiYWRtaW4iOnRydWV9.
+TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ
+```
+
+ในภาษา Go จะใช้ package [jwt-go](https://github.com/golang-jwt/jwt) ในการสร้าง และตรวจสอบ JWT
+
+```go
+package util
+
+import (
+	"fmt"
+	"time"
+
+	"github.com/golang-jwt/jwt/v4"
+)
+
+type authClaims struct {
+	Email string `json:"email"`
+	jwt.StandardClaims
+}
+
+func GenerateToken(uid string, email string, secretKey string) (string, error) {
+	claims := &authClaims{
+		email,
+		jwt.StandardClaims{
+			IssuedAt: time.Now().Unix(),
+			Subject:  uid,
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	//encoded string
+	return token.SignedString([]byte(secretKey))
+}
+
+func ValidateToken(encodedToken string, secretKey string) (bool, jwt.MapClaims, error) {
+	token, err := jwt.Parse(encodedToken, func(token *jwt.Token) (interface{}, error) {
+		if _, isvalid := token.Method.(*jwt.SigningMethodHMAC); !isvalid {
+			return nil, fmt.Errorf("invalid token %v", token.Header["alg"])
+
+		}
+		return []byte(secretKey), nil
+	})
+
+	if err != nil {
+		return false, nil, err
+	}
+
+	if !token.Valid {
+		return false, nil, nil
+	}
+	claims := token.Claims.(jwt.MapClaims)
+	return true, claims, nil
+}
+```
+
+## Authentication with JWT
+
+จะลองสร้าง Authentication API โดยใช้ JWT Token กัน ซึ่งจะมี API ดังนี้
+
+| Route                 | Method | Description                      |
+| --------------------- | ------ | -------------------------------- |
+| /api/v1/auth/register | POST   | สำหรับลงทะเบียนผู้ใช้งานใหม่     |
+| /api/v1/auth/login    | POST   | ลงชื่อเข้าใช้งาน จะได้ JWT Token |
+| /api/v1/auth/profile  | GET    | ดึงข้อมูลผู้ใช้งานด้วย JWT Token |
+
+### Register API
+
+เอาไว้สำหรับสร้างผู้ใช้งานใหม่ โดยจะทำง่ายๆ จะใช้ email กับ password
+
+- สร้าง User Model
+
+```go
+type User struct {
+	ID        uuid.UUID `gorm:"primary_key;type:uuid;default:uuid_generate_v4()"`
+	Email     string    `gorm:"uniqueIndex"`
+	Password  string
+	Role      UserRole  `sql:"user_role" gorm:"default:'user'"`
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+type UserRole string
+
+const (
+	ADMIN UserRole = "admin"
+	USER  UserRole = "user"
+)
+
+func (e *UserRole) Scan(value interface{}) error {
+	*e = UserRole(value.(string))
+	return nil
+}
+
+func (e UserRole) Value() (driver.Value, error) {
+	return string(e), nil
+}
+
+func (e UserRole) String() string {
+	switch e {
+	case ADMIN:
+		return "admin"
+	default:
+		return "user"
+	}
+}
+```
+
+- สร้าง AuthRepository เพื่อสร้างผู้ใช้งานใหม่
+
+```go
+package ports
+
+type AuthRepository interface {
+	FindUserByEmail(email string) (*model.User, error)
+	CreateUser(*model.User) error
+}
+```
+
+```go
+package repository
+
+type authRepositoryDB struct {
+	db *gorm.DB
+}
+
+func NewAuthRepositoryDB(db *gorm.DB) ports.AuthRepository {
+	return &authRepositoryDB{db}
+}
+
+func (r authRepositoryDB) FindUserByEmail(email string) (*model.User, error) {
+	user := model.User{}
+	db := r.db.Where("email = ?", email).First(&user)
+	if err := db.Error; err != nil {
+		// handle error not found
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, common.ErrRecordNotFound
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r authRepositoryDB) CreateUser(user *model.User) error {
+	return r.db.Create(&user).Error
+}
+```
+
+- สร้าง AuthService สำหรับสร้างผู้ใช้งานใหม่ โดยต้องมีการตรวจสอบว่า email เคยใช้ไปหรือยังด้วย
+
+```go
+package dto
+
+type RegisterForm struct {
+	Email    string `json:"email" validate:"required"`
+	Password string `json:"password" validate:"required"`
+}
+```
+
+```go
+package ports
+
+type AuthService interface {
+	Register(form dto.RegisterForm, reqId string) error
+}
+```
+
+```go
+package service
+
+var (
+	ErrUserEmailDuplication = common.NewBadRequestError("email already exists")
+	ErrHashPassword         = common.NewUnexpectedError("error occurred while hashing password")
+)
+
+type authService struct {
+	repo ports.AuthRepository
+}
+
+func NewAuthService(repo ports.AuthRepository) ports.AuthService {
+	return &authService{repo}
+}
+
+func (s authService) Register(form dto.RegisterForm, reqId string) error {
+	// validate
+	if err := common.ValidateDto(form); err != nil {
+		return common.NewInvalidError(err.Error())
+	}
+
+	u, err := s.repo.FindUserByEmail(form.Email)
+
+	if err != nil && !errors.Is(err, common.ErrRecordNotFound) {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return common.ErrDbQuery
+	}
+
+	if u != nil {
+		return ErrUserEmailDuplication
+	}
+
+	auth := model.User{Email: form.Email}
+	hashPwd, err := util.HashPassword(form.Password)
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return ErrHashPassword
+	}
+	auth.Password = hashPwd
+
+	err = s.repo.CreateUser(&auth)
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return common.ErrDbInsert
+	}
+
+	return nil
+}
+```
+
+- สร้าง AuthHandler สำหรับจัดการ Request และ Response
+
+```go
+package handler
+
+type AuthHandler interface {
+	Register(common.HContext) error
+}
+
+type authHandler struct {
+	serv ports.AuthService
+}
+
+func NewAuthHandler(serv ports.AuthService) AuthHandler {
+	return &authHandler{serv}
+}
+
+// @Summary Register a new user
+// @Description Register a new user
+// @Tags Auth
+// @Accept json
+// @Produce json
+// @Param user body swagger.RegisterForm true "User Data"
+// @Failure 422 {object} swagdto.Error422{error=swagger.ErrRegisterSampleData}
+// @Failure 500 {object} swagdto.Error500
+// @Success 201
+// @Router /auth/register [post]
+func (h authHandler) Register(c common.HContext) error {
+	// แปลง JSON เป็น struct
+	form := new(dto.RegisterForm)
+	if err := c.BodyParser(form); err != nil {
+		return common.ResponseError(c, common.ErrBodyParser)
+	}
+	// ส่งต่อไปให้ service ทำงาน
+	err := h.serv.Register(*form, c.RequestId())
+	if err != nil {
+		// error จะถูกจัดการมาจาก service แล้ว
+		return common.ResponseError(c, err)
+	}
+  // ส่งแค่สถานะ 201 กลับไป
+	return common.ResponseCreated(c, "", nil)
+}
+```
+
+- สร้าง route สำหรับการลงทะเบียนผู้ใช้งานใหม่
+
+```go
+func SetupRoutes(cfg RouteConfig) {
+	h := handler.NewAuthHandler(cfg.AuthService)
+
+	auth := cfg.Router.Group(cfg.BaseURL + "/auth")
+
+	auth.Post("/register", util.WrapFiberHandler(h.Register))
+}
+```
+
+- ทดสอบสร้างผู้ใช้งานใหม่
+
+```bash
+curl -XPOST \
+-H "Content-type: application/json" \
+-d '{
+  "email": "user@mail.com",
+  "password": "user"
+}' \
+'http://localhost:8080/api/v1/auth/register'
+
+// Output
+Created
+```
+
+### Login API
+
+เมื่อสร้างผู้ใช้งานแล้ว ก็มาสร้าง API สำหรับการ Login ซึ่งเมื่อ Login สำเร็จจะได้ JWT Token ตอบกลับไป
+
+- แก้ไข AuthService สำหรับ login โดยจะไปดึงผู้ใช้งานจาก email มาตรวจสอบรหัสผ่านว่าตรงกันหรือไม่ ถ้าตรงกันจะสร้าง JWT Token ตอบกลับไป
+
+```go
+package dto
+
+type LoginForm struct {
+	Email    string `json:"email" validate:"required"`
+	Password string `json:"password" validate:"required"`
+}
+
+type UserInfo struct {
+	ID    string `json:"id"`
+	Email string `json:"email"`
+	Role  string `json:"role"`
+}
+
+type TokenInfo struct {
+	Token  string    `json:"token"`
+	Expire time.Time `json:"expire"`
+}
+
+type AuthResponse struct {
+	User  UserInfo `json:"user"`
+	Token string   `json:"token"`
+}
+```
+
+```diff
+package ports
+
+type AuthService interface {
+	Register(form dto.RegisterForm, reqId string) error
++	Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error)
+}
+```
+
+```go
+package service
+
+var (
+	ErrUserEmailDuplication = common.NewBadRequestError("email already exists")
+	ErrHashPassword         = common.NewUnexpectedError("error occurred while hashing password")
+	ErrLogin                = common.NewUnauthorizedError("the email or password are incorrect")
+	ErrGenerateToken        = common.NewUnexpectedError("error occurred while generating token")
+)
+
+type authService struct {
+	config *config.Config  // เพิ่ม config เข้ามาเพื่อเรียกใช้ env
+	repo   ports.AuthRepository
+}
+
+func NewAuthService(config *config.Config, repo ports.AuthRepository) ports.AuthService {
+	return &authService{config, repo}
+}
+
+func (s authService) Register(form dto.RegisterForm, reqId string) error {
+	// ...
+}
+
+func (s authService) Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error) {
+	// validate form
+	err := common.ValidateDto(form)
+	if err != nil {
+		return nil, common.NewInvalidError(err.Error())
+	}
+  // ค้นหาจาก email
+	user, err := s.repo.FindUserByEmail(form.Email)
+	if err != nil {
+		if errors.Is(err, common.ErrRecordNotFound) {
+			return nil, ErrLogin
+		}
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, common.ErrDbQuery
+	}
+	// ตรวจสอบรหัสผ่าน ตรงกันหรือไม่
+	match := util.CheckPasswordHash(form.Password, user.Password)
+
+	if !match {
+		return nil, ErrLogin
+	}
+  // สร้าง jwt token
+	token, err := util.GenerateToken(user.ID.String(), user.Email, s.config.Token.SecretKey)
+
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrGenerateToken
+	}
+  // ตอบกลับไปพร้อมข้อมูล user
+	serialized := dto.AuthResponse{
+		User: dto.UserInfo{
+			ID:    user.ID.String(),
+			Email: user.Email,
+			Role:  user.Role.String(),
+		},
+		Token: token,
+	}
+	return &serialized, nil
+}
+```
+
+- แก้ไข AuthHandler สำหรับจัดการ Request และ Response ของการ Login
+
+```go
+package handler
+
+type AuthHandler interface {
+	Register(common.HContext) error
+  Login(c common.HContext) error
+}
+
+type authHandler struct {
+	serv ports.AuthService
+}
+
+func NewAuthHandler(serv ports.AuthService) AuthHandler {
+	return &authHandler{serv}
+}
+
+func (h authHandler) Register(c common.HContext) error {
+	// ...
+}
+
+// @Summary Login
+// @Description Login
+// @Tags Auth
+// @Accept  json
+// @Produce  json
+// @Param user body swagger.LoginForm true "Login Data"
+// @Failure 401 {object} swagdto.Error401
+// @Failure 422 {object} swagdto.Error422{error=swagger.ErrLoginSampleData}
+// @Failure 500 {object} swagdto.Error500
+// @Success 200 {object} swagdto.Response{data=swagger.AuthSampleData}
+// @Router /auth/login [post]
+func (h authHandler) Login(c common.HContext) error {
+	// แปลง JSON เป็น struct
+	form := new(dto.LoginForm)
+	if err := c.BodyParser(form); err != nil {
+		return common.ResponseError(c, common.ErrBodyParser)
+	}
+	// ส่งต่อไปให้ service ทำงาน
+	auth, err := h.serv.Login(*form, c.RequestId())
+	if err != nil {
+		// error จะถูกจัดการมาจาก service แล้ว
+		return common.ResponseError(c, err)
+	}
+
+	return common.ResponseOk(c, "auth", auth)
+}
+```
+
+- สร้าง route สำหรับการ login
+
+```go
+func SetupRoutes(cfg RouteConfig) {
+	h := handler.NewAuthHandler(cfg.AuthService)
+
+	auth := cfg.Router.Group(cfg.BaseURL + "/auth")
+
+	auth.Post("/register", util.WrapFiberHandler(h.Register))
+	auth.Post("/login", util.WrapFiberHandler(h.Login))
+}
+```
+
+- ทดสอบ Login
+
+```bash
+curl -XPOST \
+-H "Content-type: application/json" \
+-d '{
+  "email": "user@mail.com",
+  "password": "user"
+}' \
+'http://localhost:8080/api/v1/auth/login'
+
+// Output
+{
+	"status":200,
+	"data":{
+		"auth":{
+			"user":{
+				"id":"96ae35c4-14cb-4033-ba30-5da0f60661b4",
+				"email":"user@mail.com",
+				"role":"user"
+			},
+			"token":"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAbWFpbC5jb20iLCJpYXQiOjE2NTk0MzM3NDUsInN1YiI6Ijk2YWUzNWM0LTE0Y2ItNDAzMy1iYTMwLTVkYTBmNjA2NjFiNCJ9.ebGT-Hp0iX4AKNxu3y9cbKVirqZlKXrzalfylIK9okI"
+		}
+	},
+	"requestId":"7db49212-5b00-416d-8c04-6bafb5777fd5"
+}
+```
+
+### Profile API
+
+เป็น API สำหรับดึงข้อมูลผู้ใช้งาน โดยจะมีการตรวจสอบการ login จาก JWT Token ที่ต้องส่งมาผ่าน Request Header `Authorization: Bearer TOKEN_STRING`
+
+- แก้ไข AuthService เพิ่ม service สำหรับการดึงข้อมูลผู้ใช้งาน โดยจะใช้ email จาก JWT Token
+
+```diff
+package ports
+
+type AuthService interface {
+	Register(form dto.RegisterForm, reqId string) error
+	Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error)
++	Profile(userId string, reqId string) (*dto.UserInfo, error)
+}
+```
+
+```go
+package service
+
+var (
+	ErrUserEmailDuplication = common.NewBadRequestError("email already exists")
+	ErrHashPassword         = common.NewUnexpectedError("error occurred while hashing password")
+	ErrLogin                = common.NewUnauthorizedError("the email or password are incorrect")
+	ErrGenerateToken        = common.NewUnexpectedError("error occurred while generating token")
+	ErrValidateToken        = common.NewUnexpectedError("error occurred while validating token")
+	ErrNoToken              = common.NewUnauthorizedError("the token is required")
+	ErrInvalidToken         = common.NewUnauthorizedError("the token is invalid")
+	ErrUserNotfound         = common.NewUnauthorizedError("user not found")
+)
+
+type authService struct {
+	config *config.Config  // เพิ่ม config เข้ามาเพื่อเรียกใช้ env
+	repo   ports.AuthRepository
+}
+
+func NewAuthService(config *config.Config, repo ports.AuthRepository) ports.AuthService {
+	return &authService{config, repo}
+}
+
+func (s authService) Register(form dto.RegisterForm, reqId string) error {
+	// ...
+}
+
+func (s authService) Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error) {
+	// ...
+}
+
+func (s authService) Profile(auth string, reqId string) (*dto.UserInfo, error) {
+	// validate token
+	if auth == "" {
+		return nil, ErrNoToken
+	}
+
+	token := strings.TrimPrefix(auth, "Bearer ")
+	valid, claims, err := util.ValidateToken(token, s.config.Token.SecretKey)
+
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrValidateToken
+	}
+
+	if !valid {
+		return nil, ErrInvalidToken
+	}
+	// ค้นหา user จาก email
+	email := claims["email"].(string)
+
+	user, err := s.repo.FindUserByEmail(email)
+
+	if err != nil {
+		if errors.Is(err, common.ErrRecordNotFound) {
+			return nil, ErrUserNotfound
+		}
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, common.ErrDbQuery
+	}
+
+	serialized := dto.UserInfo{
+		ID:    user.ID.String(),
+		Email: user.Email,
+		Role:  user.Role.String(),
+	}
+
+	return &serialized, nil
+}
+```
+
+- แก้ไข AuthHandler สำหรับจัดการ Request และ Response ของการดึง profile โดยจะมีการอ่านค่า Authorization จาก request header ออกมา
+
+```go
+package handler
+
+type AuthHandler interface {
+	Register(common.HContext) error
+  Login(c common.HContext) error
+  Profile(c common.HContext) error
+}
+
+type authHandler struct {
+	serv ports.AuthService
+}
+
+func NewAuthHandler(serv ports.AuthService) AuthHandler {
+	return &authHandler{serv}
+}
+
+func (h authHandler) Register(c common.HContext) error {
+	// ...
+}
+
+func (h authHandler) Login(c common.HContext) error {
+	// ...
+}
+
+// @Summary Get a user profile
+// @Description Get a specific user by id
+// @Produce json
+// @Tags Auth
+// @Param Authorization header string true "Bearer"
+// @Failure 401 {object} swagdto.Error401
+// @Failure 500 {object} swagdto.Error500
+// @Success 200 {object} swagdto.Response{data=swagger.UserSampleData}
+// @Router /auth/profile [get]
+func (h authHandler) Profile(c common.HContext) error {
+	auth := c.Authorization()
+
+	user, err := h.serv.Profile(auth, c.RequestId())
+
+	if err != nil {
+		return common.ResponseError(c, err)
+	}
+
+	return common.ResponseOk(c, "user", user)
+}
+```
+
+- สร้าง route สำหรับการดึง profile
+
+```go
+func SetupRoutes(cfg RouteConfig) {
+	h := handler.NewAuthHandler(cfg.AuthService)
+
+	auth := cfg.Router.Group(cfg.BaseURL + "/auth")
+
+	auth.Post("/register", util.WrapFiberHandler(h.Register))
+	auth.Post("/login", util.WrapFiberHandler(h.Login))
+  auth.Get("/profile", util.WrapFiberHandler(h.Profile))
+}
+```
+
+- ทดสอบดึงข้อมูลผู้ใช้งาน
+
+```bash
+curl -XGET \
+-H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAbWFpbC5jb20iLCJpYXQiOjE2NTk0MzU0ODUsInN1YiI6Ijk2YWUzNWM0LTE0Y2ItNDAzMy1iYTMwLTVkYTBmNjA2NjFiNCJ9.VumaO_pQjc4GQRvpj6XKMeMb3rWCOC7tmrIGkjoU1lQ' \
+'http://localhost:8080/api/v1/auth/profile'
+
+// Output
+{
+	"status":200,
+	"data":{
+		"user":{
+			"id":"96ae35c4-14cb-4033-ba30-5da0f60661b4",
+			"email":"user@mail.com",
+			"role":"user"
+		}
+	},
+	"requestId":"ec9afe42-e722-42ed-8ef6-4ab8cf3c34b5"
+}
+```
+
+### Authentication Middleware
+
+จากโค้ดข้างบน จะเห็นว่ามีการตรวจสอบ token ใน Profile Service ซึ่งถ้าเรามี route อื่นๆ ที่ต้องตรวจสอบด้วย การที่จะเขียนโค้ดแบบนี้ในทุกๆ service คงไม่ดีแน่ ดังนั้น เราจะใช้วิธีการสร้าง middleware สำหรับการตรวจสอบ token นี้ ขึ้นมาแทน แล้วเอาไปวางไปหน้า route ที่ต้องการป้องกันการเข้าถึงแทน
+
+- สร้าง authentication middleware โดยการย้ายโค้ดการตรวจสอบ token มาไว้ที่นี่
+
+```go
+package middleware
+
+import (
+	"goapi/pkg/common"
+	"goapi/pkg/common/logger"
+	"goapi/pkg/util"
+	"strings"
+)
+
+var (
+	ErrNoToken       = common.NewUnauthorizedError("the token is required")
+	ErrValidateToken = common.NewUnexpectedError("error occurred while validating token")
+	ErrInvalidToken  = common.NewUnauthorizedError("the token is invalid")
+)
+
+func Authentication(secretKey string) common.HandleFunc {
+	return func(c common.HContext) error {
+		auth := c.Authorization()
+		// validate token
+		if auth == "" {
+			return common.ResponseError(c, ErrNoToken)
+		}
+
+		token := strings.TrimPrefix(auth, "Bearer ")
+		valid, claims, err := util.ValidateToken(token, secretKey)
+
+		if err != nil {
+			logger.ErrorWithReqId(err.Error(), c.RequestId())
+			return common.ResponseError(c, ErrValidateToken)
+		}
+
+		if !valid {
+			return common.ResponseError(c, ErrInvalidToken)
+		}
+
+		c.Locals("user", claims)
+
+		return c.Next()
+	}
+}
+```
+
+- เรียกใช้งาน middleware โดยการเอาไปวางหน้า handler ที่ตรงการ
+
+```go
+func SetupRoutes(cfg RouteConfig) {
+	h := handler.NewAuthHandler(cfg.AuthService)
+
+	auth := cfg.Router.Group(cfg.BaseURL + "/auth")
+
+	auth.Post("/register", util.WrapFiberHandler(h.Register))
+	auth.Post("/login", util.WrapFiberHandler(h.Login))
+  // เพิ่มตรงนี้
+	authentication := util.WrapFiberHandler(middleware.Authentication(cfg.TokenSecret))
+	auth.Get("/profile", authentication, util.WrapFiberHandler(h.Profile))
+}
+```
+
+- ถ้า authentication สำเร็จ ใน handler ก็จะสามารถดึงค่า jwt.MapClaims ออกมาจากได้
+
+```go
+// @Summary Get a user profile
+// @Description Get a specific user by id
+// @Produce json
+// @Tags Auth
+// @Param Authorization header string true "Bearer"
+// @Failure 401 {object} swagdto.Error401
+// @Failure 500 {object} swagdto.Error500
+// @Success 200 {object} swagdto.Response{data=swagger.UserSampleData}
+// @Router /auth/profile [get]
+func (h authHandler) Profile(c common.HContext) error {
+	u := c.Locals("user").(jwt.MapClaims)
+	email := u["email"].(string)
+
+	user, err := h.serv.Profile(email, c.RequestId())
+
+	if err != nil {
+		return common.ResponseError(c, err)
+	}
+
+	return common.ResponseOk(c, "user", user)
+}
+```
+
+- ส่วนใน service ก็รับเอา email มาค้นหาข้อมูลผู้ใช้งานได้เลย
+
+```go
+func (s authService) Profile(email string, reqId string) (*dto.UserInfo, error) {
+	// validate
+	if email == "" {
+		return nil, ErrUserNotfound
+	}
+
+	user, err := s.repo.FindUserByEmail(email)
+
+	if err != nil {
+		if errors.Is(err, common.ErrRecordNotFound) {
+			return nil, ErrUserNotfound
+		}
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, common.ErrDbQuery
+	}
+
+	serialized := dto.UserInfo{
+		ID:    user.ID.String(),
+		Email: user.Email,
+		Role:  user.Role.String(),
+	}
+
+	return &serialized, nil
+}
+```
+
+- ทดสอบดึงข้อมูลผู้ใช้งาน
+
+```bash
+curl -XGET \
+-H 'Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAbWFpbC5jb20iLCJpYXQiOjE2NTk0MzU0ODUsInN1YiI6Ijk2YWUzNWM0LTE0Y2ItNDAzMy1iYTMwLTVkYTBmNjA2NjFiNCJ9.VumaO_pQjc4GQRvpj6XKMeMb3rWCOC7tmrIGkjoU1lQ' \
+'http://localhost:8080/api/v1/auth/profile'
+
+// Output
+{
+	"status":200,
+	"data":{
+		"user":{
+			"id":"96ae35c4-14cb-4033-ba30-5da0f60661b4",
+			"email":"user@mail.com",
+			"role":"user"
+		}
+	},
+	"requestId":"ec9afe42-e722-42ed-8ef6-4ab8cf3c34b5"
+}
+```
+
+### Authentication Middleware with exclude list
+
+ถ้ามี routes ที่ต้องการป้องกันหลายๆ routes เราสามารถย้าย authentication middleware มาไว้ที่ global middleware แทน แล้วใส่ public routes ไว้เข้าไปเป็น exclude list
+
+- แก้ไข authentication middleware ให้รับ exclude list มาตรวจสอบ
+
+```go
+package middleware
+
+import (
+	"goapi/pkg/common"
+	"goapi/pkg/common/logger"
+	"goapi/pkg/util"
+	"strings"
+
+	"golang.org/x/exp/slices"
+)
+
+var (
+	ErrNoToken       = common.NewUnauthorizedError("the token is required")
+	ErrValidateToken = common.NewUnexpectedError("error occurred while validating token")
+	ErrInvalidToken  = common.NewUnauthorizedError("the token is invalid or expired")
+)
+
+func Authentication(secretKey string, excludeList map[string][]string) common.HandleFunc {
+	return func(c common.HContext) error {
+		public := false
+
+		if methods, ok := excludeList[c.Path()]; ok {
+			public = slices.Contains(methods, c.Method())
+		}
+		// สำหรับ health check
+		if !public && strings.Contains(c.Path(), "/healthz") {
+			public = true
+		}
+		// สำหรับ document
+		if !public && strings.Contains(c.Path(), "/swagger/") {
+			public = true
+		}
+
+		if !public && strings.Contains(c.Path(), "/thirdpartySwagger/") {
+			public = true
+		}
+		// ถ้าไม่ใช่ public route ให้ทำงานเหมือนเดิม
+		if !public {
+			auth := c.Authorization()
+			// validate token
+			if auth == "" {
+				return common.ResponseError(c, ErrNoToken)
+			}
+
+			token := strings.TrimPrefix(auth, "Bearer ")
+			valid, claims, err := util.ValidateToken(token, secretKey)
+
+			if err != nil {
+				logger.ErrorWithReqId(err.Error(), c.RequestId())
+				return common.ResponseError(c, ErrValidateToken)
+			}
+
+			if !valid {
+				return common.ResponseError(c, ErrInvalidToken)
+			}
+
+			c.Locals("user", claims)
+		}
+
+		return c.Next()
+	}
+}
+```
+
+- เรียกใช้งานวางไว้หน้าทุก routes
+
+```go
+func (a *app) InitRouter() {
+	cfg := fiber.Config{
+		AppName:               fmt.Sprintf("%s v%s", a.Config.App.Name, a.Config.App.Version),
+		ReadTimeout:           a.Config.Server.TimeoutRead,
+		WriteTimeout:          a.Config.Server.TimeoutWrite,
+		IdleTimeout:           a.Config.Server.TimeoutIdle,
+		DisableStartupMessage: a.Config.App.IsProdMode(),
+	}
+	r := fiber.New(cfg)
+	// Default middleware config
+	r.Use(cors.New())
+	r.Use(requestid.New())
+	r.Use(logger.New(logger.Config{
+		Format: "[${time}] ${locals:requestid} ${status} - ${latency} ${method} ${path}\n",
+	}))
+	r.Use(recover.New())
+
+	// public routes
+	excludeList := map[string][]string{
+		"/api/v1/auth/register": {http.MethodPost},
+		"/api/v1/auth/login":    {http.MethodPost},
+	}
+	// authentication with exclude list
+	r.Use(util.WrapFiberHandler(middleware.Authentication(a.Config.Token.SecretKey, excludeList)))
+
+	a.Router = r
+}
+```
+
+- และเอา middleware ที่ auth module ออก
+
+```go
+func SetupRoutes(cfg RouteConfig) {
+	h := handler.NewAuthHandler(cfg.AuthService)
+
+	auth := cfg.Router.Group(cfg.BaseURL + "/auth")
+
+	auth.Post("/register", util.WrapFiberHandler(h.Register))
+	auth.Post("/login", util.WrapFiberHandler(h.Login))
+
+	// authentication := util.WrapFiberHandler(middleware.Authentication(cfg.TokenSecret))
+	// auth.Get("/profile", authentication, util.WrapFiberHandler(h.Profile))
+	auth.Get("/profile", util.WrapFiberHandler(h.Profile))
+}
+```
+
+- ทดสอบดึงข้อมูลผู้ใช้งาน
+
+```bash
+curl -XGET \
+'http://localhost:8080/api/v1/auth/profile'
+
+// Output
+{
+	"status":401,
+	"error":{
+		"code":401,
+		"message":"the token is required"
+	},
+	"requestId":"7b926046-a5cb-4a70-ad0f-b06b9457a95d"
+}
+```
+
+ดูโค้ดทั้งหมดได้[ที่นี่](https://github.com/somprasongd/blog-golang/tree/main/goapi-jwt)
