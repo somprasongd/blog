@@ -60,7 +60,7 @@ TJVA95OrM7E2cBab30RMHrHDcEfxjoYZgeFONFh7HgQ
 
 ในภาษา Go จะใช้ package [jwt-go](https://github.com/golang-jwt/jwt) ในการสร้าง และตรวจสอบ JWT
 
-```go
+```go:util/jwt.go
 package util
 
 import (
@@ -72,12 +72,14 @@ import (
 
 type authClaims struct {
 	Email string `json:"email"`
+	Role  string `json:"role"`
 	jwt.StandardClaims
 }
 
-func GenerateToken(uid string, email string, secretKey string) (string, error) {
+func GenerateToken(uid string, email string, role string, secretKey string) (string, error) {
 	claims := &authClaims{
 		email,
+		role,
 		jwt.StandardClaims{
 			IssuedAt: time.Now().Unix(),
 			Subject:  uid,
@@ -127,7 +129,7 @@ func ValidateToken(encodedToken string, secretKey string) (bool, jwt.MapClaims, 
 
 - สร้าง User Model
 
-```go
+```go:pkg/module/auth/core/model/user.go
 type User struct {
 	ID        uuid.UUID `gorm:"primary_key;type:uuid;default:uuid_generate_v4()"`
 	Email     string    `gorm:"uniqueIndex"`
@@ -165,7 +167,7 @@ func (e UserRole) String() string {
 
 - สร้าง AuthRepository เพื่อสร้างผู้ใช้งานใหม่
 
-```go
+```go:pkg/module/auth/core/ports/auth.go
 package ports
 
 type AuthRepository interface {
@@ -175,7 +177,7 @@ type AuthRepository interface {
 }
 ```
 
-```go
+```go:pkg/module/auth/repository/auth.go
 package repository
 
 type authRepositoryDB struct {
@@ -210,7 +212,7 @@ func (r authRepositoryDB) SaveProfile(user *model.User) error {
 
 - สร้าง AuthService สำหรับสร้างผู้ใช้งานใหม่ โดยต้องมีการตรวจสอบว่า email เคยใช้ไปหรือยังด้วย
 
-```go
+```go:pkg/module/auth/core/dto/auth.go
 package dto
 
 type RegisterForm struct {
@@ -219,7 +221,7 @@ type RegisterForm struct {
 }
 ```
 
-```go
+```go:pkg/module/auth/core/ports/auth.go
 package ports
 
 type AuthService interface {
@@ -227,7 +229,7 @@ type AuthService interface {
 }
 ```
 
-```go
+```go:pkg/module/auth/core/service/auth.go
 package service
 
 var (
@@ -280,7 +282,7 @@ func (s authService) Register(form dto.RegisterForm, reqId string) error {
 
 - สร้าง AuthHandler สำหรับจัดการ Request และ Response
 
-```go
+```go:pkg/module/auth/core/handler/auth.go
 package handler
 
 type AuthHandler interface {
@@ -324,7 +326,7 @@ func (h authHandler) Register(c common.HContext) error {
 
 - สร้าง route สำหรับการลงทะเบียนผู้ใช้งานใหม่
 
-```go
+```go:pkg/module/auth/module.go
 func SetupRoutes(cfg RouteConfig) {
 	h := handler.NewAuthHandler(cfg.AuthService)
 
@@ -355,7 +357,7 @@ Created
 
 - แก้ไข AuthService สำหรับ login โดยจะไปดึงผู้ใช้งานจาก email มาตรวจสอบรหัสผ่านว่าตรงกันหรือไม่ ถ้าตรงกันจะสร้าง JWT Token ตอบกลับไป
 
-```go
+```go:pkg/module/auth/core/dto/auth.go
 package dto
 
 type LoginForm struct {
@@ -380,7 +382,7 @@ type AuthResponse struct {
 }
 ```
 
-```diff
+```diff:pkg/module/auth/core/ports/auth.go
 package ports
 
 type AuthService interface {
@@ -389,7 +391,7 @@ type AuthService interface {
 }
 ```
 
-```go
+```go:pkg/module/auth/core/service/auth.go
 package service
 
 var (
@@ -455,7 +457,7 @@ func (s authService) Login(form dto.LoginForm, reqId string) (*dto.AuthResponse,
 
 - แก้ไข AuthHandler สำหรับจัดการ Request และ Response ของการ Login
 
-```go
+```go:pkg/module/auth/handler/auth.go
 package handler
 
 type AuthHandler interface {
@@ -505,7 +507,7 @@ func (h authHandler) Login(c common.HContext) error {
 
 - สร้าง route สำหรับการ login
 
-```go
+```go:pkg/module/auth/module.go
 func SetupRoutes(cfg RouteConfig) {
 	h := handler.NewAuthHandler(cfg.AuthService)
 
@@ -550,7 +552,7 @@ curl -XPOST \
 
 - แก้ไข AuthService เพิ่ม service สำหรับการดึงข้อมูลผู้ใช้งาน โดยจะใช้ email จาก JWT Token
 
-```diff
+```diff:pkg/module/auth/core/ports/auth.go
 package ports
 
 type AuthService interface {
@@ -560,7 +562,7 @@ type AuthService interface {
 }
 ```
 
-```go
+```go:pkg/module/auth/core/service/auth.go
 package service
 
 var (
@@ -633,7 +635,7 @@ func (s authService) Profile(auth string, reqId string) (*dto.UserInfo, error) {
 
 - แก้ไข AuthHandler สำหรับจัดการ Request และ Response ของการดึง profile โดยจะมีการอ่านค่า Authorization จาก request header ออกมา
 
-```go
+```go:pkg/module/auth/handler/auth.go
 package handler
 
 type AuthHandler interface {
@@ -682,7 +684,7 @@ func (h authHandler) Profile(c common.HContext) error {
 
 - สร้าง route สำหรับการดึง profile
 
-```go
+```go:pkg/module/auth/module.go
 func SetupRoutes(cfg RouteConfig) {
 	h := handler.NewAuthHandler(cfg.AuthService)
 
@@ -721,7 +723,7 @@ curl -XGET \
 
 - แก้ไข AuthService เพิ่ม service สำหรับการแก้ข้อมูลผู้ใช้งาน โดยจะใช้ email จาก JWT Token
 
-```go
+```go:pkg/module/auth/core/dto/auth.go
 package dto
 
 type UpdateProfileForm struct {
@@ -730,7 +732,7 @@ type UpdateProfileForm struct {
 }
 ```
 
-```diff
+```diff:pkg/module/auth/core/ports/auth.go
 package ports
 
 type AuthService interface {
@@ -743,7 +745,7 @@ type AuthService interface {
 
 - แก้ไข AuthHandler สำหรับจัดการ Request และ Response ของการแก้ข้อมูลผู้ใช้งาน โดยจะมีการอ่านค่า Authorization จาก request header ออกมา
 
-```go
+```go:pkg/module/auth/handler/auth.go
 package handler
 
 type AuthHandler interface {
@@ -766,7 +768,7 @@ func NewAuthHandler(serv ports.AuthService) AuthHandler {
 
 - สร้าง route สำหรับการดึง profile
 
-```go
+```go:pkg/module/auth/module.go
 func SetupRoutes(cfg RouteConfig) {
 	h := handler.NewAuthHandler(cfg.AuthService)
 
@@ -785,7 +787,7 @@ func SetupRoutes(cfg RouteConfig) {
 
 - สร้าง authentication middleware โดยการย้ายโค้ดการตรวจสอบ token มาไว้ที่นี่
 
-```go
+```go:pkg/module/auth/middleware/authentication.go
 package middleware
 
 import (
@@ -830,7 +832,7 @@ func Authentication(secretKey string) common.HandleFunc {
 
 - เรียกใช้งาน middleware โดยการเอาไปวางหน้า handler ที่ตรงการ
 
-```go
+```go:pkg/module/auth/module.go
 func SetupRoutes(cfg RouteConfig) {
 	h := handler.NewAuthHandler(cfg.AuthService)
 
@@ -847,7 +849,7 @@ func SetupRoutes(cfg RouteConfig) {
 
 - ถ้า authentication สำเร็จ ใน handler ก็จะสามารถดึงค่า jwt.MapClaims ออกมาจากได้
 
-```go
+```go:pkg/module/auth/handler/auth.go
 // @Summary Get a user profile
 // @Description Get a specific user by id
 // @Produce json
@@ -904,7 +906,7 @@ func (h authHandler) UpdateProfile(c common.HContext) error {
 
 - ส่วนใน service ก็รับเอา email มาค้นหาข้อมูลผู้ใช้งานได้เลย
 
-```go
+```go:pkg/module/auth/core/service/auth.go
 func (s authService) Profile(email string, reqId string) (*dto.UserInfo, error) {
 	// validate
 	if email == "" {
@@ -1004,7 +1006,7 @@ curl -XGET \
 
 - แก้ไข authentication middleware ให้รับ exclude list มาตรวจสอบ
 
-```go
+```go:pkg/app/middleware/authentication.go
 package middleware
 
 import (
@@ -1071,7 +1073,7 @@ func Authentication(secretKey string, excludeList map[string][]string) common.Ha
 
 - เรียกใช้งานวางไว้หน้าทุก routes
 
-```go
+```go:pkg/app/app.go
 func (a *app) InitRouter() {
 	cfg := fiber.Config{
 		AppName:               fmt.Sprintf("%s v%s", a.Config.App.Name, a.Config.App.Version),
@@ -1103,7 +1105,7 @@ func (a *app) InitRouter() {
 
 - และเอา middleware ที่ auth module ออก
 
-```go
+```go:pkg/module/auth/module.go
 func SetupRoutes(cfg RouteConfig) {
 	h := handler.NewAuthHandler(cfg.AuthService)
 

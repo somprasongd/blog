@@ -76,38 +76,49 @@ func (h UserHandler) DeleteUser(c common.HContext) error {
 Casbin เป็น library ที่เอามาช่วยทำ authorization โดยใช้หลัการ PERM (Policy, Effect, Request, Matchers)
 
 - **Policy** ใช้ตัวย่อ `p` คือ การตั้งกฏขึ้นมาประกอบ `sub, obj, act`
+
   - **sub** คือ การบอกว่าใคร ถ้าเราเอามาทำ RBAC ก็จะเป็นการระบุชื่อ role เช่น
-    | sub | คำอธิบาย |
+
+    | sub     | คำอธิบาย             |
     | ------- | -------------------- | ------------------------ |
-    | admin | เฉพาะ admin เท่านั้น |
-    | user | เฉพาะ user เท่านั้น |
-    | (admin) | (user) | admin หรือ user เท่านั้น |
+    | admin   | เฉพาะ admin เท่านั้น |
+    | user    | เฉพาะ user เท่านั้น  |
+    | (admin) | (user)               | admin หรือ user เท่านั้น |
+
   - **obj** คือ กำหนดว่า sub นั้นๆ ทำอะไรได้บ้าง โดยปกติจะระบุเป็น url path เช่น
-    | obj | คำอธิบาย |
+
+    | obj              | คำอธิบาย                                          |
     | ---------------- | ------------------------------------------------- |
-    | /api/v1/users | ต้องเป็น /api/v1/users เท่านั้น |
+    | /api/v1/users    | ต้องเป็น /api/v1/users เท่านั้น                   |
     | /api/v1/users/\* | ขึ้นต้นด้วย /api/v1/users ข้างหลังจะเป็นอะไรก็ได้ |
+
   - **act** คือ การเข้าถึง obj ด้วย action อะไร เราก็จะใช้ HTTP Method เป็นเงื่อนไข เช่น
-    | obj | act | คำอธิบาย |
+
+    | obj              | act    | คำอธิบาย |
     | ---------------- | ------ | -------- | --------------------------------------------------- | ------------------------------------------------------------------- |
-    | /api/v1/users | (POST) | (GET) | ต้องเข้าถึง /api/v1/users ด้วย Method POST หรือ GET |
-    | /api/v1/users/_ | (GET) | (PATCH) | (DELETE) | ต้องเข้าถึง /api/v1/users/_ ด้วย Method GET หรือ PATCH หรือ DELETE |
+    | /api/v1/users    | (POST) | (GET)    | ต้องเข้าถึง /api/v1/users ด้วย Method POST หรือ GET |
+    | /api/v1/users/\* | (GET)  | (PATCH)  | (DELETE)                                            | ต้องเข้าถึง /api/v1/users/\* ด้วย Method GET หรือ PATCH หรือ DELETE |
+
 - **Request** ใช้ตัวย่อ `r` คือ สิ่งที่เราสิ่งเข้าไปตรวจสอบเทียบกับ Policy ที่ตั้งไว้ โดยจะต้องส่งเป็น `sub, obj, act` ไปให้เหมือนกัน
   - **sub** เราอาจจะส่ง `role` เข้าไปเลย หรือ `User struct` เข้าไปเลยก็ได้
   - **obj** ให้ส่ง request path เข้าไป เช่น `/api/v1/users/1`
   - **act** ให้ส่ง request method เข้าไป เช่น `GET`
 - **Matchers** ใช้ตัวย่อ `m` คือวิธีการตรวจสอบ Request เทียบกับ Policy โดยจะมี functions การตรวจสอบดังนี้
-  | Function | arg1 ค่าจาก r | arg2 ค่าจาก p |
-  | ---------- | ------------------------ | ---------------------------- |
-  | keyMatch | /api/v1/users/1 | /api/v1/users/\* |
-  | keyMatch2 | /api/v1/users/1 | /api/v1/users/:id |
-  | keyMatch3 | /api/v1/users/1 | /api/v1/users/\{id\} |
-  | keyMatch4 | /api/v1/users/1/todo/123 | /api/v1/users/\{id\}/todo/\{id\} |
-  | regexMatch | any string | regex pattern |
-  | ipMatch | 192.168.1.123 | 192.168.1.0/24 |
+
+  | Function   | arg1 ค่าจาก r            | arg2 ค่าจาก p                    |
+  | ---------- | ------------------------ | -------------------------------- |
+  | keyMatch   | /api/v1/users/1          | /api/v1/users/\*                 |
+  | keyMatch2  | /api/v1/users/1          | /api/v1/users/:id                |
+  | keyMatch3  | /api/v1/users/1          | /api/v1/users/\{id\}             |
+  | keyMatch4  | /api/v1/users/1/todo/123 | /api/v1/users/\{id\}/todo/\{id\} |
+  | regexMatch | any string               | regex pattern                    |
+  | ipMatch    | 192.168.1.123            | 192.168.1.0/24                   |
+
   ที่ใช้งานบ่อย คือ
+
   - **keyMatch** → เอาไว้ตรวจสอบ path แบบไม่ต้องสนใจว่าจะมีอะไรต่อท้าย เช่น `keyMatch(r.obj, p.obj)`
   - **regexMatch** → เอาไว้ตรวจสอบ role ของผู้ใช้งาน `regexMatch(r.sub.Role, p.sub)` และ method ที่เรียกเข้ามา `regexMatch(r.act, p.act)`
+
 - **Effect** ใช้ตัวย่อ `e` เนื่องจากการเปรียบเทียบเราสามารถมี matcher ได้หลายตัว และแต่ละ matcher จะได้ค่า Policy Effect ออกมาเป็น `allow` หรือ `deny` ดังนั้นเราจะต้องมีกฏในการรวม Policy Effect (Effect Expression) ถ้าเป็น true การ authorization ก็จะผ่าน แต่ถ้าเป็น false ก็จะไม่ผ่านนั่นเอง ตัวอย่างเช่น
   - `e = some(where (p.eft == allow))` คือ ขอแค่มี matcher แค่ตัวเดียวที่เป็น allow
   - `e = !some(where (p.eft == deny))` คือ matcher ทุกตัวต้อง allow
@@ -118,7 +129,7 @@ Casbin เป็น library ที่เอามาช่วยทำ authoriza
 
 - สร้าง policy ไว้ที่ `config/policy.csv`
 
-```
+```:config/policy.csv
 p, (admin)|(user), /api/v1/auth/profile, (GET)|(PATCH)
 p, admin, /api/v1/users, (GET)|(POST)
 p, admin, /api/v1/users/*, (GET)|(PATCH)|(DELETE)
@@ -128,7 +139,7 @@ p, admin, /api/v1/users/*, (GET)|(PATCH)|(DELETE)
 
 - จากนั้นมาสร้าง model ไว้ที่ `config/acl_model.conf`
 
-```
+```:config/acl_model.conf
 # กำหนดรูปแบบของ request
 [request_definition]
 r = sub, obj, act
@@ -148,7 +159,7 @@ m = regexMatch(r.sub, p.sub) && keyMatch(r.obj, p.obj) && regexMatch(r.act, p.ac
 
 - สร้าง authorization middleware โดยถ้าเป็น public route จะไม่ตรวจสอบ
 
-```go
+```go:pkg/app/middleware/authorization.go
 package middleware
 
 import (
@@ -195,7 +206,7 @@ func Authorize(enforcer *casbin.Enforcer) common.HandleFunc {
 
 - แก้ไข authentication middleware ให้เพิ่มการส่งค่าว่าเป็น public route หรือไม่ เนื่องจาก authorization ต้องถูกเรียกใช้งานหลัง
 
-```diff
+```diff:pkg/app/middleware/authentication.go
 func Authentication(secretKey string, excludeList map[string][]string) common.HandleFunc {
 	return func(c common.HContext) error {
 		public := false
@@ -211,7 +222,7 @@ func Authentication(secretKey string, excludeList map[string][]string) common.Ha
 
 - เรียกใช้งาน authorization middleware
 
-```diff
+```diff:pkg/app/app.go
 -func (a *app) InitRouter() {
 +func (a *app) InitRouter(enforcer *casbin.Enforcer) {
 	// ...
@@ -225,7 +236,7 @@ func Authentication(secretKey string, excludeList map[string][]string) common.Ha
 
 - โหลด policy และ model ที่ `main.go`
 
-```diff
+```diff:cmd/api/main.go
 func main() {
 	// Load config
 	cfg := config.LoadConfig()
@@ -264,7 +275,7 @@ func main() {
 
 - แก้ไข policy เพิ่ม public route เข้าไป โดยจะใช้ `p2` เป็นตัวกำหนด
 
-```diff
+```diff:config/policy.csv
 p, (admin)|(user), /api/v1/auth/profile, (GET)|(PATCH)
 p, admin, /api/v1/users, (GET)|(POST)
 p, admin, /api/v1/users/*, (GET)|(PATCH)|(DELETE)
@@ -275,7 +286,7 @@ p, admin, /api/v1/users/*, (GET)|(PATCH)|(DELETE)
 
 - แก้ไข model เพิ่มกฏสำหรับการตรวจสอบ public route เนื่องจากจะใช้แค่ route และ method ดังนั้นจะเหลือแค่ `obj, act`
 
-```diff
+```diff:config/acl_model.conf
 # กำหนดรูปแบบของ request
 [request_definition]
 r = sub, obj, act
@@ -300,7 +311,7 @@ m = regexMatch(r.sub, p.sub) && keyMatch(r.obj, p.obj) && regexMatch(r.act, p.ac
 
 - แก้ไข authentication middleware ให้ใช้ Casbin ตรวจสอบ public route
 
-```go
+```go:pkg/app/middleware/authentication.go
 func AuthenticationCasbin(secretKey string, enforcer *casbin.Enforcer) common.HandleFunc {
 	return func(c common.HContext) error {
 		public := false
@@ -357,7 +368,7 @@ func AuthenticationCasbin(secretKey string, enforcer *casbin.Enforcer) common.Ha
 
 - เปลี่ยนมาเรียกใช้ `AuthenticationCasbin`
 
-```diff
+```diff:pkg/app/app.go
 func (a *app) InitRouter(enforcer *casbin.Enforcer) {
 	// ...
 
