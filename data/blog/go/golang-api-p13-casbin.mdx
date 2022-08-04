@@ -7,8 +7,6 @@ draft: false
 summary: 'การใช้ Casbin เพื่อทำ Athorization แบบ Role-Based Access Control (RBAC)'
 ---
 
-# Authorization RBAC with Casbin
-
 นอกจากการยืนยันตัวตนด้วยการทำ authentication เพื่อป้องกันการเข้าถึงทรัพยากรบนเซิร์ฟเวอร์แล้วนั้น ทรัพยากรบางอย่างจำเป็นต้องมีสิทธิ์การเข้าถึง (permission) ด้วย
 
 ดังนั้น จะต้องมีการตรวจสอบสิทธิ์การเข้าถึงทรัพยากร (authorization) ในเซิฟเวอร์ว่าสามารถเข้าใช้งานได้หรือไม่ ซึ่งวิธีการหนึ่งที่นิยมใช้กัน คือ Role Base Access Control (RBAC) ซึ่งเป็นการตรวจสอบสิทธิ์จาก Role ของผู้ใช้งานนั่นเอง
@@ -29,7 +27,7 @@ summary: 'การใช้ Casbin เพื่อทำ Athorization แบบ
 
 วิธีการตรวจสอบสิทธิ์การใช้งานว่าต้องเป็น admin เท่านั้น ถึงจะเข้าถึง resources นั้นๆ ได้ ทำได้ง่ายๆ โดยการ เพิ่มการตรวจสอบ role ที่ทุกๆ handler function แบบนี้
 
-```go
+```go:pkg/module/user/handler/handler.go
 func (h UserHandler) CreateUser(c common.HContext) error {
 	u := c.Locals("user").(jwt.MapClaims)
 	if role := u["role"].(string); role != "admin" {
@@ -93,7 +91,7 @@ Casbin เป็น library ที่เอามาช่วยทำ authoriza
     | obj | act | คำอธิบาย |
     | ---------------- | ------ | -------- | --------------------------------------------------- | ------------------------------------------------------------------- |
     | /api/v1/users | (POST) | (GET) | ต้องเข้าถึง /api/v1/users ด้วย Method POST หรือ GET |
-    | /api/v1/users/\* | (GET) | (PATCH) | (DELETE) | ต้องเข้าถึง /api/v1/users/\* ด้วย Method GET หรือ PATCH หรือ DELETE |
+    | /api/v1/users/_ | (GET) | (PATCH) | (DELETE) | ต้องเข้าถึง /api/v1/users/_ ด้วย Method GET หรือ PATCH หรือ DELETE |
 - **Request** ใช้ตัวย่อ `r` คือ สิ่งที่เราสิ่งเข้าไปตรวจสอบเทียบกับ Policy ที่ตั้งไว้ โดยจะต้องส่งเป็น `sub, obj, act` ไปให้เหมือนกัน
   - **sub** เราอาจจะส่ง `role` เข้าไปเลย หรือ `User struct` เข้าไปเลยก็ได้
   - **obj** ให้ส่ง request path เข้าไป เช่น `/api/v1/users/1`
@@ -103,8 +101,8 @@ Casbin เป็น library ที่เอามาช่วยทำ authoriza
   | ---------- | ------------------------ | ---------------------------- |
   | keyMatch | /api/v1/users/1 | /api/v1/users/\* |
   | keyMatch2 | /api/v1/users/1 | /api/v1/users/:id |
-  | keyMatch3 | /api/v1/users/1 | /api/v1/users/{id} |
-  | keyMatch4 | /api/v1/users/1/todo/123 | /api/v1/users/{id}/todo/{id} |
+  | keyMatch3 | /api/v1/users/1 | /api/v1/users/\{id\} |
+  | keyMatch4 | /api/v1/users/1/todo/123 | /api/v1/users/\{id\}/todo/\{id\} |
   | regexMatch | any string | regex pattern |
   | ipMatch | 192.168.1.123 | 192.168.1.0/24 |
   ที่ใช้งานบ่อย คือ
@@ -121,7 +119,7 @@ Casbin เป็น library ที่เอามาช่วยทำ authoriza
 - สร้าง policy ไว้ที่ `config/policy.csv`
 
 ```
-p, (admin)|(user), /api/v1/auth/profile, GET
+p, (admin)|(user), /api/v1/auth/profile, (GET)|(PATCH)
 p, admin, /api/v1/users, (GET)|(POST)
 p, admin, /api/v1/users/*, (GET)|(PATCH)|(DELETE)
 ```
@@ -267,7 +265,7 @@ func main() {
 - แก้ไข policy เพิ่ม public route เข้าไป โดยจะใช้ `p2` เป็นตัวกำหนด
 
 ```diff
-p, (admin)|(user), /api/v1/auth/profile, GET
+p, (admin)|(user), /api/v1/auth/profile, (GET)|(PATCH)
 p, admin, /api/v1/users, (GET)|(POST)
 p, admin, /api/v1/users/*, (GET)|(PATCH)|(DELETE)
 
