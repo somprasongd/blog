@@ -1,7 +1,7 @@
 ---
 title: 'API Service with Go: Authentication with JWT'
 date: '2022-08-02'
-lastmod: '2022-08-03'
+lastmod: '2022-08-04'
 tags: ['authentication', 'jwt', 'go']
 draft: false
 summary: 'ป้องกันการเข้าถึงทรัพยากรบนเซิร์ฟเวอร์ด้วย JSON Web Token'
@@ -13,7 +13,7 @@ summary: 'ป้องกันการเข้าถึงทรัพยา�
 
 แต่ถ้าต้องทำการ login ใหม่ทุกครั้ง คงไม่ดีแน่ ดังนั้นเมื่อทำการ login สำเร็จ เราจะสร้างอะไรบางอย่างส่งกลับไปให้ Client ด้วย เช่น ใช้ token และทุกครั้งที่จะเรียกใช้งาน API จะให้ client จะต้องส่ง token มาด้วย แทนการ login
 
-## JSON Web Token
+## JSON Web Token (JWT)
 
 Token ที่นิยมใช้กันรูปแบบหนึ่ง คือ [JWT](https://somprasongd.work/blog/nodejs/nodejs-jwt) ซึ่งประกอบด้วย 3 ส่วน แบ่งด้วย dots (.)
 
@@ -119,6 +119,7 @@ func ValidateToken(encodedToken string, secretKey string) (bool, jwt.MapClaims, 
 | /api/v1/auth/register | POST   | สำหรับลงทะเบียนผู้ใช้งานใหม่     |
 | /api/v1/auth/login    | POST   | ลงชื่อเข้าใช้งาน จะได้ JWT Token |
 | /api/v1/auth/profile  | GET    | ดึงข้อมูลผู้ใช้งานด้วย JWT Token |
+| /api/v1/auth/profile  | PACTH  | แก้ไขข้อมูลส่วนตัวโดยผู้ใช้งาน   |
 
 ### Register API
 
@@ -170,6 +171,7 @@ package ports
 type AuthRepository interface {
 	FindUserByEmail(email string) (*model.User, error)
 	CreateUser(*model.User) error
+  SaveProfile(m *model.User) error
 }
 ```
 
@@ -199,6 +201,10 @@ func (r authRepositoryDB) FindUserByEmail(email string) (*model.User, error) {
 
 func (r authRepositoryDB) CreateUser(user *model.User) error {
 	return r.db.Create(&user).Error
+}
+
+func (r authRepositoryDB) SaveProfile(user *model.User) error {
+	return r.db.Save(&user).Error
 }
 ```
 
@@ -540,7 +546,7 @@ curl -XPOST \
 
 ### Profile API
 
-เป็น API สำหรับดึงข้อมูลผู้ใช้งาน โดยจะมีการตรวจสอบการ login จาก JWT Token ที่ต้องส่งมาผ่าน Request Header `Authorization: Bearer TOKEN_STRING`
+เป็น API สำหรับดึงข้อมูลผู้ใช้งาน โดยจะมีการตรวจสอบการ login จาก JWT Token ที่ต้องส่งมาผ่าน Request Header `Authorization: Bearer TOKEN_STRING` เพื่อระบุตัวผู้ใช้งาน
 
 - แก้ไข AuthService เพิ่ม service สำหรับการดึงข้อมูลผู้ใช้งาน โดยจะใช้ email จาก JWT Token
 
@@ -550,7 +556,7 @@ package ports
 type AuthService interface {
 	Register(form dto.RegisterForm, reqId string) error
 	Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error)
-+	Profile(userId string, reqId string) (*dto.UserInfo, error)
++	Profile(email string, reqId string) (*dto.UserInfo, error)
 }
 ```
 
@@ -709,6 +715,70 @@ curl -XGET \
 }
 ```
 
+### Update Profile API
+
+เป็น API สำหรับแก้ข้อมูลผู้ใช้งาน โดยจะมีการตรวจสอบการ login จาก JWT Token ที่ต้องส่งมาผ่าน Request Header `Authorization: Bearer TOKEN_STRING` เพื่อระบุตัวผู้ใช้งาน
+
+- แก้ไข AuthService เพิ่ม service สำหรับการแก้ข้อมูลผู้ใช้งาน โดยจะใช้ email จาก JWT Token
+
+```go
+package dto
+
+type UpdateProfileForm struct {
+	PasswordOld string `json:"password_old"`
+	PasswordNew string `json:"password_new"`
+}
+```
+
+```diff
+package ports
+
+type AuthService interface {
+	Register(form dto.RegisterForm, reqId string) error
+	Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error)
+  Profile(email string, reqId string) (*dto.UserInfo, error)
++ UpdateProfile(email string, form dto.UpdateProfileForm, reqId string) (*dto.UserInfo, error)
+}
+```
+
+- แก้ไข AuthHandler สำหรับจัดการ Request และ Response ของการแก้ข้อมูลผู้ใช้งาน โดยจะมีการอ่านค่า Authorization จาก request header ออกมา
+
+```go
+package handler
+
+type AuthHandler interface {
+	Register(common.HContext) error
+  Login(c common.HContext) error
+  Profile(c common.HContext) error
+  UpdateProfile(c common.HContext) error
+}
+
+type authHandler struct {
+	serv ports.AuthService
+}
+
+func NewAuthHandler(serv ports.AuthService) AuthHandler {
+	return &authHandler{serv}
+}
+
+// ...
+```
+
+- สร้าง route สำหรับการดึง profile
+
+```go
+func SetupRoutes(cfg RouteConfig) {
+	h := handler.NewAuthHandler(cfg.AuthService)
+
+	auth := cfg.Router.Group(cfg.BaseURL + "/auth")
+
+	auth.Post("/register", util.WrapFiberHandler(h.Register))
+	auth.Post("/login", util.WrapFiberHandler(h.Login))
+  auth.Get("/profile", util.WrapFiberHandler(h.Profile))
+  auth.Patch("/profile", util.WrapFiberHandler(h.UpdateProfile))
+}
+```
+
 ### Authentication Middleware
 
 จากโค้ดข้างบน จะเห็นว่ามีการตรวจสอบ token ใน Profile Service ซึ่งถ้าเรามี route อื่นๆ ที่ต้องตรวจสอบด้วย การที่จะเขียนโค้ดแบบนี้ในทุกๆ service คงไม่ดีแน่ ดังนั้น เราจะใช้วิธีการสร้าง middleware สำหรับการตรวจสอบ token นี้ ขึ้นมาแทน แล้วเอาไปวางไปหน้า route ที่ต้องการป้องกันการเข้าถึงแทน
@@ -771,6 +841,7 @@ func SetupRoutes(cfg RouteConfig) {
   // เพิ่มตรงนี้
 	authentication := util.WrapFiberHandler(middleware.Authentication(cfg.TokenSecret))
 	auth.Get("/profile", authentication, util.WrapFiberHandler(h.Profile))
+  auth.Patch("/profile", authentication, util.WrapFiberHandler(h.UpdateProfile))
 }
 ```
 
@@ -798,6 +869,37 @@ func (h authHandler) Profile(c common.HContext) error {
 
 	return common.ResponseOk(c, "user", user)
 }
+
+// @Summary Update a user password
+// @Description Update a user password
+// @Produce json
+// @Tags User
+// @Param Authorization header string true "Bearer"
+// @Param user body swagger.UpdateProfileForm true "User Password"
+// @Failure 400 {object} swagdto.Error400
+// @Failure 404 {object} swagdto.Error404
+// @Failure 422 {object} swagdto.Error422{error=swagger.ErrUpdateSampleData}
+// @Failure 500 {object} swagdto.Error500
+// @Success 200 {object} swagdto.Response{data=swagger.UserSampleData}
+// @Router /users/{id} [patch]
+func (h authHandler) UpdateProfile(c common.HContext) error {
+	u := c.Locals("user").(jwt.MapClaims)
+	email := u["email"].(string)
+
+	form := dto.UpdateProfileForm{}
+
+	if err := c.BodyParser(&form); err != nil {
+		return common.ResponseError(c, err)
+	}
+
+	user, err := h.serv.UpdateProfile(email, form, c.RequestId())
+
+	if err != nil {
+		return common.ResponseError(c, err)
+	}
+
+	return common.ResponseOk(c, "user", user)
+}
 ```
 
 - ส่วนใน service ก็รับเอา email มาค้นหาข้อมูลผู้ใช้งานได้เลย
@@ -817,6 +919,52 @@ func (s authService) Profile(email string, reqId string) (*dto.UserInfo, error) 
 		}
 		logger.ErrorWithReqId(err.Error(), reqId)
 		return nil, common.ErrDbQuery
+	}
+
+	serialized := dto.UserInfo{
+		ID:    user.ID.String(),
+		Email: user.Email,
+		Role:  user.Role.String(),
+	}
+
+	return &serialized, nil
+}
+
+func (s authService) UpdateProfile(email string, form dto.UpdateProfileForm, reqId string) (*dto.UserInfo, error) {
+	// validate
+	err := common.ValidateDto(form)
+	if err != nil {
+		return nil, common.NewInvalidError(err.Error())
+	}
+
+	user, err := s.repo.FindUserByEmail(email)
+	if err != nil {
+		if errors.Is(err, common.ErrRecordNotFound) {
+			return nil, ErrUserNotfound
+		}
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, common.ErrDbQuery
+	}
+
+	match := util.CheckPasswordHash(form.PasswordOld, user.Password)
+
+	if !match {
+		return nil, ErrUserPasswordNotMatch
+	}
+
+	hashPwd, err := util.HashPassword(form.PasswordNew)
+
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrHashPassword
+	}
+
+	user.Password = hashPwd
+
+	err = s.repo.SaveProfile(user)
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, common.ErrDbUpdate
 	}
 
 	serialized := dto.UserInfo{
@@ -967,6 +1115,7 @@ func SetupRoutes(cfg RouteConfig) {
 	// authentication := util.WrapFiberHandler(middleware.Authentication(cfg.TokenSecret))
 	// auth.Get("/profile", authentication, util.WrapFiberHandler(h.Profile))
 	auth.Get("/profile", util.WrapFiberHandler(h.Profile))
+  auth.Patch("/profile", util.WrapFiberHandler(h.UpdateProfile))
 }
 ```
 
@@ -987,4 +1136,4 @@ curl -XGET \
 }
 ```
 
-ดูโค้ดทั้งหมดได้[ที่นี่](https://github.com/somprasongd/blog-golang/tree/main/goapi-jwt)
+สามารถดูโค้ดทั้งหมดได้[ที่นี่](https://github.com/somprasongd/blog-golang/tree/main/goapi-jwt)

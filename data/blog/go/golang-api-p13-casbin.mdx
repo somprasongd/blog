@@ -1,0 +1,382 @@
+---
+title: 'API Service with Go: Authorization RBAC with Casbin'
+date: '2022-08-04'
+lastmod: '2022-08-04'
+tags: ['authorization', 'rbac', 'casbin', 'go']
+draft: false
+summary: 'การใช้ Casbin เพื่อทำ Athorization แบบ Role-Based Access Control (RBAC)'
+---
+
+# Authorization RBAC with Casbin
+
+นอกจากการยืนยันตัวตนด้วยการทำ authentication เพื่อป้องกันการเข้าถึงทรัพยากรบนเซิร์ฟเวอร์แล้วนั้น ทรัพยากรบางอย่างจำเป็นต้องมีสิทธิ์การเข้าถึง (permission) ด้วย
+
+ดังนั้น จะต้องมีการตรวจสอบสิทธิ์การเข้าถึงทรัพยากร (authorization) ในเซิฟเวอร์ว่าสามารถเข้าใช้งานได้หรือไม่ ซึ่งวิธีการหนึ่งที่นิยมใช้กัน คือ Role Base Access Control (RBAC) ซึ่งเป็นการตรวจสอบสิทธิ์จาก Role ของผู้ใช้งานนั่นเอง
+
+## เพิ่ม Users Resource
+
+[โค้ด](https://github.com/somprasongd/blog-golang/tree/main/goapi-jwt)จากบทความที่แล้ว จะสร้างผู้ใช้งานใหม่ได้โดยการ Register บทความนี้จะเอาโค้ดมาเพิ่ม users resource เพื่อเอาไว้สำหรับให้ admin ทำการเพิ่ม แก้ไข ลบ และแสดงรายชื่อผู้ใช้งานทั้งหมดขึ้นมา
+
+| Method | URL               | Role  | Description                           |
+| ------ | ----------------- | ----- | ------------------------------------- |
+| POST   | /api/v1/users     | admin | สร้างผู้ใช้งานใหม่ทั้ง admin และ user |
+| GET    | /api/v1/users     | admin | แสดงรายชื่อผู้ใช้งานทั้งหมด           |
+| GET    | /api/v1/users/:id | admin | แสดงผู้ใช้งานจาก id                   |
+| PATCH  | /api/v1/users/:id | admin | แก้ไขข้อมูลผู้ใช้งานจาก id            |
+| DELETE | /api/v1/users/:id | admin | ลบผู้ใช้งานจาก id                     |
+
+### วิธีการตรวจสอบสิทธิ์การใช้งาน
+
+วิธีการตรวจสอบสิทธิ์การใช้งานว่าต้องเป็น admin เท่านั้น ถึงจะเข้าถึง resources นั้นๆ ได้ ทำได้ง่ายๆ โดยการ เพิ่มการตรวจสอบ role ที่ทุกๆ handler function แบบนี้
+
+```go
+func (h UserHandler) CreateUser(c common.HContext) error {
+	u := c.Locals("user").(jwt.MapClaims)
+	if role := u["role"].(string); role != "admin" {
+		return common.ResponseError(c, common.NewForbiddenError("only admin"))
+	}
+  // ...
+}
+
+func (h UserHandler) ListUser(c common.HContext) error {
+	u := c.Locals("user").(jwt.MapClaims)
+	if role := u["role"].(string); role != "admin" {
+		return common.ResponseError(c, common.NewForbiddenError("only admin"))
+	}
+  // ...
+}
+
+func (h UserHandler) GetUser(c common.HContext) error {
+	u := c.Locals("user").(jwt.MapClaims)
+	if role := u["role"].(string); role != "admin" {
+		return common.ResponseError(c, common.NewForbiddenError("only admin"))
+	}
+  // ...
+}
+
+func (h UserHandler) UpdateUser(c common.HContext) error {
+	u := c.Locals("user").(jwt.MapClaims)
+	if role := u["role"].(string); role != "admin" {
+		return common.ResponseError(c, common.NewForbiddenError("only admin"))
+	}
+  // ...
+}
+
+func (h UserHandler) DeleteUser(c common.HContext) error {
+	u := c.Locals("user").(jwt.MapClaims)
+	if role := u["role"].(string); role != "admin" {
+		return common.ResponseError(c, common.NewForbiddenError("only admin"))
+	}
+  // ...
+}
+```
+
+ซึ่งเป็นวิธีที่ไม่ดี เราควรสร้างเป็น authorization middleware ขึ้นมาแทน และในบทความนี้จะใช้ [Casbin](https://casbin.io/) มาช่วยในการทำ authorization แบบ RBAC
+
+## มาทำความรู้จัก Casbin
+
+Casbin เป็น library ที่เอามาช่วยทำ authorization โดยใช้หลัการ PERM (Policy, Effect, Request, Matchers)
+
+- **Policy** ใช้ตัวย่อ `p` คือ การตั้งกฏขึ้นมาประกอบ `sub, obj, act`
+  - **sub** คือ การบอกว่าใคร ถ้าเราเอามาทำ RBAC ก็จะเป็นการระบุชื่อ role เช่น
+    | sub | คำอธิบาย |
+    | ------- | -------------------- | ------------------------ |
+    | admin | เฉพาะ admin เท่านั้น |
+    | user | เฉพาะ user เท่านั้น |
+    | (admin) | (user) | admin หรือ user เท่านั้น |
+  - **obj** คือ กำหนดว่า sub นั้นๆ ทำอะไรได้บ้าง โดยปกติจะระบุเป็น url path เช่น
+    | obj | คำอธิบาย |
+    | ---------------- | ------------------------------------------------- |
+    | /api/v1/users | ต้องเป็น /api/v1/users เท่านั้น |
+    | /api/v1/users/\* | ขึ้นต้นด้วย /api/v1/users ข้างหลังจะเป็นอะไรก็ได้ |
+  - **act** คือ การเข้าถึง obj ด้วย action อะไร เราก็จะใช้ HTTP Method เป็นเงื่อนไข เช่น
+    | obj | act | คำอธิบาย |
+    | ---------------- | ------ | -------- | --------------------------------------------------- | ------------------------------------------------------------------- |
+    | /api/v1/users | (POST) | (GET) | ต้องเข้าถึง /api/v1/users ด้วย Method POST หรือ GET |
+    | /api/v1/users/\* | (GET) | (PATCH) | (DELETE) | ต้องเข้าถึง /api/v1/users/\* ด้วย Method GET หรือ PATCH หรือ DELETE |
+- **Request** ใช้ตัวย่อ `r` คือ สิ่งที่เราสิ่งเข้าไปตรวจสอบเทียบกับ Policy ที่ตั้งไว้ โดยจะต้องส่งเป็น `sub, obj, act` ไปให้เหมือนกัน
+  - **sub** เราอาจจะส่ง `role` เข้าไปเลย หรือ `User struct` เข้าไปเลยก็ได้
+  - **obj** ให้ส่ง request path เข้าไป เช่น `/api/v1/users/1`
+  - **act** ให้ส่ง request method เข้าไป เช่น `GET`
+- **Matchers** ใช้ตัวย่อ `m` คือวิธีการตรวจสอบ Request เทียบกับ Policy โดยจะมี functions การตรวจสอบดังนี้
+  | Function | arg1 ค่าจาก r | arg2 ค่าจาก p |
+  | ---------- | ------------------------ | ---------------------------- |
+  | keyMatch | /api/v1/users/1 | /api/v1/users/\* |
+  | keyMatch2 | /api/v1/users/1 | /api/v1/users/:id |
+  | keyMatch3 | /api/v1/users/1 | /api/v1/users/{id} |
+  | keyMatch4 | /api/v1/users/1/todo/123 | /api/v1/users/{id}/todo/{id} |
+  | regexMatch | any string | regex pattern |
+  | ipMatch | 192.168.1.123 | 192.168.1.0/24 |
+  ที่ใช้งานบ่อย คือ
+  - **keyMatch** → เอาไว้ตรวจสอบ path แบบไม่ต้องสนใจว่าจะมีอะไรต่อท้าย เช่น `keyMatch(r.obj, p.obj)`
+  - **regexMatch** → เอาไว้ตรวจสอบ role ของผู้ใช้งาน `regexMatch(r.sub.Role, p.sub)` และ method ที่เรียกเข้ามา `regexMatch(r.act, p.act)`
+- **Effect** ใช้ตัวย่อ `e` เนื่องจากการเปรียบเทียบเราสามารถมี matcher ได้หลายตัว และแต่ละ matcher จะได้ค่า Policy Effect ออกมาเป็น `allow` หรือ `deny` ดังนั้นเราจะต้องมีกฏในการรวม Policy Effect (Effect Expression) ถ้าเป็น true การ authorization ก็จะผ่าน แต่ถ้าเป็น false ก็จะไม่ผ่านนั่นเอง ตัวอย่างเช่น
+  - `e = some(where (p.eft == allow))` คือ ขอแค่มี matcher แค่ตัวเดียวที่เป็น allow
+  - `e = !some(where (p.eft == deny))` คือ matcher ทุกตัวต้อง allow
+
+## Role-Based Access Control (RBAC) with Casbin
+
+คร่าวนี้นำเอา Casbin มาใช้ในการทำ Authorization แบบ RBAC กัน ซึ่งมีขั้นตอนดังนี้
+
+- สร้าง policy ไว้ที่ `config/policy.csv`
+
+```
+p, (admin)|(user), /api/v1/auth/profile, GET
+p, admin, /api/v1/users, (GET)|(POST)
+p, admin, /api/v1/users/*, (GET)|(PATCH)|(DELETE)
+```
+
+ซึ่งจะกำหนดให้ `/api/v1/auth/profile` เข้าถึงได้ทุก role ส่วน `/api/v1/users` ต้องเป็น admin เท่านั้น
+
+- จากนั้นมาสร้าง model ไว้ที่ `config/acl_model.conf`
+
+```
+# กำหนดรูปแบบของ request
+[request_definition]
+r = sub, obj, act
+
+# กำหนดรูปแบบของ policy
+[policy_definition]
+p = sub, obj, act
+
+# ตั้งกฏให้ผ่านเมื่อมี matcher ตัวใดตัวหนึ่งเป็น allow
+[policy_effect]
+e = some(where (p.eft == allow))
+
+# ตั้งกฏการเปรียบเทียบ request กับ policy
+[matchers]
+m = regexMatch(r.sub, p.sub) && keyMatch(r.obj, p.obj) && regexMatch(r.act, p.act)
+```
+
+- สร้าง authorization middleware โดยถ้าเป็น public route จะไม่ตรวจสอบ
+
+```go
+package middleware
+
+import (
+	"fmt"
+	"goapi/pkg/common"
+  "goapi/pkg/common/logger"
+
+	"github.com/casbin/casbin/v2"
+	"github.com/golang-jwt/jwt/v4"
+)
+
+var (
+	ErrUnauthorize = common.NewForbiddenError("you are not allowed to access this resource")
+	ErrEnforce     = common.NewUnexpectedError("error occurred while enforce")
+)
+
+func Authorize(enforcer *casbin.Enforcer) common.HandleFunc {
+	return func(c common.HContext) error {
+    // ถ้าเป็น public route ให้ข้ามการตรวจสอบไป
+		public := c.Locals("public").(bool)
+		if public {
+			return c.Next()
+		}
+		// ดึงค่า role ออกมา
+		u := c.Locals("user").(jwt.MapClaims)
+		role := u["role"].(string)
+
+    // ส่ง request เข้าไปตรวจสอบ
+		ok, err := enforcer.Enforce(role, c.Path(), c.Method())
+
+		if err != nil {
+			logger.ErrorWithReqId(err.Error(), c.RequestId())
+			return common.ResponseError(c, ErrEnforce)
+		}
+
+		if !ok {
+			return common.ResponseError(c, ErrUnauthorize)
+		}
+
+		return c.Next()
+	}
+}
+```
+
+- แก้ไข authentication middleware ให้เพิ่มการส่งค่าว่าเป็น public route หรือไม่ เนื่องจาก authorization ต้องถูกเรียกใช้งานหลัง
+
+```diff
+func Authentication(secretKey string, excludeList map[string][]string) common.HandleFunc {
+	return func(c common.HContext) error {
+		public := false
+
+		// ...
+
++		c.Locals("public", public)
+
+		return c.Next()
+	}
+}
+```
+
+- เรียกใช้งาน authorization middleware
+
+```diff
+-func (a *app) InitRouter() {
++func (a *app) InitRouter(enforcer *casbin.Enforcer) {
+	// ...
+	r.Use(util.WrapFiberHandler(middleware.Authentication(a.Config.Token.SecretKey, excludeList)))
++	// authorization with casbin
++	r.Use(util.WrapFiberHandler(middleware.Authorize(enforcer)))
+
+	a.Router = r
+}
+```
+
+- โหลด policy และ model ที่ `main.go`
+
+```diff
+func main() {
+	// Load config
+	cfg := config.LoadConfig()
++	// Load acl model and policy
++	enforcer, err := casbin.NewEnforcer("config/acl_model.conf", "config/policy.csv")
+	if err != nil {
+		panic(err)
+	}
+
+	app := app.New(cfg)
+	// Cleanup when server stopped
+	defer app.Close()
+
+	// For Liveness Probe
+	app.CreateLivenessFile()
+
+	// Initialize data sources
+	app.InitDS()
+
+	// Create router (mux/gin/fiber)
+-	app.InitRouter()
++	app.InitRouter(enforcer)
+
+	// Initialize module with dependency injection
+	module.Init(app.Context)
+	// Start server
+	app.ServeHTTP()
+}
+```
+
+เพียงเท่านี้เราก็จะได้การทำ Authorization แบบ Role-Based Access Control (RBAC) แล้ว
+
+## Bonus ใช้ Casbin กำหนด public route
+
+เราสามารถเปลี่ยนวิธีการตรวจสอบ public route มาใช้ Casbin ได้ โดยอาจจะสร้าง policy และ model ใหม่ เพิ่มเข้า หรือตั้งกฏใหม่เพิ่มเข้าไปในไฟล์เดิมเลยก็ได้ โดยในบทความนี้จะเลือกใช้วิธีหลัง
+
+- แก้ไข policy เพิ่ม public route เข้าไป โดยจะใช้ `p2` เป็นตัวกำหนด
+
+```diff
+p, (admin)|(user), /api/v1/auth/profile, GET
+p, admin, /api/v1/users, (GET)|(POST)
+p, admin, /api/v1/users/*, (GET)|(PATCH)|(DELETE)
+
++p2, /api/v1/auth/register, POST
++p2, /api/v1/auth/login, POST
+```
+
+- แก้ไข model เพิ่มกฏสำหรับการตรวจสอบ public route เนื่องจากจะใช้แค่ route และ method ดังนั้นจะเหลือแค่ `obj, act`
+
+```diff
+# กำหนดรูปแบบของ request
+[request_definition]
+r = sub, obj, act
++r2 = obj, act
+
+# กำหนดรูปแบบของ policy
+[policy_definition]
+p = sub, obj, act
++p2 = obj, act
+
+# ตั้งกฏให้ผ่านเมื่อมี matcher ตัวใดตัวหนึ่งเป็น allow
+[policy_effect]
+e = some(where (p.eft == allow))
++# ใช้ p.eft นะ ไม่ใช่ p2.eft
++e2 = some(where (p.eft == allow))
+
+# ตั้งกฏการเปรียบเทียบ request กับ policy
+[matchers]
+m = regexMatch(r.sub, p.sub) && keyMatch(r.obj, p.obj) && regexMatch(r.act, p.act)
++m2 = keyMatch(r2.obj, p2.obj) && regexMatch(r2.act, p2.act)
+```
+
+- แก้ไข authentication middleware ให้ใช้ Casbin ตรวจสอบ public route
+
+```go
+func AuthenticationCasbin(secretKey string, enforcer *casbin.Enforcer) common.HandleFunc {
+	return func(c common.HContext) error {
+		public := false
+
+    // ระบุ suffix เช่น 2 จะใช้ r2, p2, e2, m2
+		enforceContext := casbin.NewEnforceContext("2")
+		// ต้องส่ง enforceContext เข้าไปด้วย ถ้าไม่ส่งจะเรียกที่ r, p, e, m ตลอดนะ
+		public, err := enforcer.Enforce(enforceContext, c.Path(), c.Method())
+		if err != nil {
+			fmt.Println(err)
+			return common.ResponseError(c, ErrEnforce)
+		}
+
+		if !public && strings.Contains(c.Path(), "/healthz") {
+			public = true
+		}
+
+		if !public && strings.Contains(c.Path(), "/swagger/") {
+			public = true
+		}
+
+		if !public && strings.Contains(c.Path(), "/thirdpartySwagger/") {
+			public = true
+		}
+
+		if !public {
+			auth := c.Authorization()
+			// validate token
+			if auth == "" {
+				return common.ResponseError(c, ErrNoToken)
+			}
+
+			token := strings.TrimPrefix(auth, "Bearer ")
+			valid, claims, err := util.ValidateToken(token, secretKey)
+
+			if err != nil {
+				logger.ErrorWithReqId(err.Error(), c.RequestId())
+				return common.ResponseError(c, ErrValidateToken)
+			}
+
+			if !valid {
+				return common.ResponseError(c, ErrInvalidToken)
+			}
+
+			c.Locals("user", claims)
+		}
+
+		c.Locals("public", public)
+
+		return c.Next()
+	}
+}
+```
+
+- เปลี่ยนมาเรียกใช้ `AuthenticationCasbin`
+
+```diff
+func (a *app) InitRouter(enforcer *casbin.Enforcer) {
+	// ...
+
+	// authentication with exclude list
+-	excludeList := map[string][]string{
+-	  "/api/v1/auth/register": {http.MethodPost},
+-	 	"/api/v1/auth/login":    {http.MethodPost},
+-	 }
+-	r.Use(util.WrapFiberHandler(middleware.Authentication(a.Config.Token.SecretKey, excludeList)))
++	r.Use(util.WrapFiberHandler(middleware.AuthenticationCasbin(a.Config.Token.SecretKey, enforcer)))
+	// authorization with casbin
+	r.Use(util.WrapFiberHandler(middleware.Authorize(enforcer)))
+
+	a.Router = r
+}
+```
+
+จบแล้วสำหรับการใช้ Casbin เพื่อทำ Athorization แบบ Role-Based Access Control (RBAC)
+
+สามารถดูโค้ดได้[ที่นี่](https://github.com/somprasongd/blog-golang/tree/main/goapi-casbin)
