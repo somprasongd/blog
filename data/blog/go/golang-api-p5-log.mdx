@@ -1,7 +1,7 @@
 ---
 title: 'API Service with Go: Logging'
 date: '2022-02-05'
-lastmod: '2022-04-20'
+lastmod: '2022-08-09'
 tags: ['api', 'go', 'log']
 draft: false
 summary: 'ควรแสดง log อย่างไร'
@@ -9,33 +9,44 @@ summary: 'ควรแสดง log อย่างไร'
 
 # Logging
 
-เมื่อมีการแสดง log เราควรมีการจัดการที่ดี เช่น มีการแสดง transaction_id เพื่อให้รู้ว่า log แต่ละส่วนเกิดจาก request ครั้งเดียวกัน รวมถึงการกำหนดรูปแบบของการแสดง log เพื่อให้สามารถนำไปใช้งานต่อได้สะดวก
+ในภาษา Go เมื่อเราต้องการ log ข้อมูลออกมาเพื่อดูข้อมูล สามารถใช้ `fmt.Println()` หรือ `log.Println()` เพื่อแสดงข้อมูลออกมาได้ แต่ข้อมูลที่ได้ออกมานั้นนำเอาไปใช้งานต่อลำบาก เพราะไม่มีรูปแบบที่เป็นมาตราฐาน ดังนั้นเราควรมีการจัดการ log ที่ดี เช่น การ log ข้อมูลออกมาในรูปแบบของ JSON เพื่อนำไปใช้งานต่อได้สะดวก หรือถ้ามี microservices เรียกซ้อนๆ กันหลายๆ ตัว ก็ควรมี uniquie id อะไรบางอย่าง เพื่อใช้อย่างอิงว่าไป log ของ request เดียวกัน ก็จะสะดวกต่อการค้นหา
 
-## Transaction Id
+## ค้นหาด้วย Unique ID
 
-โดยปกติเมื่อสั่งให้แสดง log ออกมา จะไม่ทราบว่า log นั้นๆ เป็นของ transcation อะไร บ้าง วิธีที่ง่ายที่สุด คือ ให้ฝั่งที่เรียกเข้ามาส่งค่า unique id มาให้ด้วยทุกครั้ง และเอาค่าที่ส่งมานั้นมาแสดงใน log ด้วย
+ในกรณีที่ระบบของเราเป็น microservices แล้วมีการเรียก service กันภายใน การแสดง log แค่ข้อความออกมานั้น เราไม่สามารถรู้ได้เลยว่า log แต่ละตัวนั้นเป็นข้อมูลชุดเดียวกันหรือไม่
 
-```go:handler/handler.go
-if err := tx.Error; err != nil {
-	appErr := errs.NewUnexpectedError(err.Error())
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		appErr = errs.NewNotFoundError("todo with given id not found")
+ดังนั้น เราควรมีรหัสอะไรบางอย่างที่เอามาใช้เพื่อบอกว่าเป็นข้อมูลของ request ครั้งเดียวกัน เช่น Request ID หรือ Transaction ID หรือถ้าใช้การ Tracing ก็ควรที่จะแสดง TraceID และ SpanID ออกมาด้วย ซึ่งเราจะใช้ค่าเหล่านั้นมาตัวบอกว่าบอกเป็น request ครั้งเดียวกัน ก็จะทำให้เราค้นหา log ได้ง่ายขึ้น
+
+### ตัวอย่าง Transaction ID
+
+เราจะให้ Client ที่เรียกเข้ามาส่งค่า unique id มาให้ด้วยทุกครั้ง ผ่านมาทาง Request Header ที่ชื่อ `X-Trasaction-Id` แล้วฝั่ง Server เอาค่าที่ส่งมานั้นมาแสดงใน log ด้วย เช่น
+
+```go
+func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
+	// ...
+  tx := database.DB.Create(&todo)
+  if err := tx.Error; err != nil {
+		appErr := errs.NewUnexpectedError(err.Error())
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			appErr = errs.NewNotFoundError("todo with given id not found")
+		}
+	  // กำหนดให้ส่ง X-Trasaction-Id เป็น uuid มาใน request header
+	  txId := r.Header.Get("X-Transaction-Id")
+		log.Println(txId, appErr.Message)
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(appErr.Code)
+		json.NewEncoder(w).Encode(appErr)
+		return
 	}
-  // กำหนดให้ส่ง x-trasaction-id เป็น uuid มาใน request header
-  txId := r.Header.Get("x-transaction-id")
-	log.Println(txId, appErr.Message)
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(appErr.Code)
-	json.NewEncoder(w).Encode(appErr)
-	return
+  // ...
 }
 
 // 2022/02/01 11:07:10 833d57ef-afb9-45c1-8450-9eff6559043e todo with given id not found
 ```
 
-## Structured Logging
+## กำหนดรูปแบบของการแสดง Log
 
-เวลาสั่ง `log.Println()` จะได้ออกมาเป็นข้อความธรรมดา นำไปใช้งานต่อได้ยาก ไม่สะดวกต่อการค้นหา ซึ่งควรจะแสดง log ออกมาในรูปแบบของ JSON ดีกว่า เช่น
+ถ้าเราแสดง log ออกมาเป็นข้อความธรรมดานั้น เวลาที่ส่งต่อไปยังโปรแกรมอื่น เช่น ELK เราก็เอาไปใช้งานต่อลำบาก ค้นหาก็ยาก ดังนั้นเรามีการกำหนดรูปแบบการแสดง log ของเรา เช่น ให้แสดงออกมาเป็น JSON แทน เช่น
 
 ```go
 2022/02/01 11:07:10 833d57ef-afb9-45c1-8450-9eff6559043e todo with given id not found
@@ -49,15 +60,17 @@ if err := tx.Error; err != nil {
 }
 ```
 
-โดยจะมี package ที่นิยมใช้งานอยู่ 2 ตัว คือ [zap](https://github.com/uber-go/zap) กับ [logrus](https://github.com/sirupsen/logrus) ส่วนในบทความนี้จะเลือกใช้ zap
+จะเห็นว่าเราสามารถค้นหาได้จากชื่อ key ได้เลย โดยจะมี package ที่นิยมใช้งานอยู่ 2 ตัว คือ [zap](https://github.com/uber-go/zap) กับ [logrus](https://github.com/sirupsen/logrus) ซึ่งในบทความนี้จะเลือกใช้ zap
 
 ```bash
 go get -u go.uber.org/zap
 ```
 
-สร้าง logger module
+### Logger Module
 
-```go:logger/logger.go
+การใช้งาน เริ่มจากสร้าง logger module ของเราขึ้นมา แบบนี้
+
+```go
 package logger
 
 import (
@@ -69,7 +82,6 @@ import (
 var log *zap.Logger
 
 func init() {
-	fmt.Println("init log")
 	var err error
 
 	log, err = zap.NewProduction()
@@ -92,9 +104,9 @@ func Error(message string, fileds ...zap.Field) {
 }
 ```
 
-ลองเรียกใช้งาน
+และเปลี่ยนการ `log.Println()` มาเป็น `logger.Info()` แทน
 
-```go:main.go
+```go
 // main.go
 func main() {
   // ...
@@ -110,11 +122,12 @@ func main() {
 
 </aside>
 
-```go:logger/logger.go
+```diff
 func init() {
 	var err error
 
-	log, err = zap.NewProduction(zap.AddCallerSkip(1))
+-  log, err = zap.NewProduction()
++	log, err = zap.NewProduction(zap.AddCallerSkip(1))
 
 	if err != nil {
 		panic(err)
@@ -122,9 +135,11 @@ func init() {
 }
 ```
 
-ถ้าต้องการเปลี่ยนชื่อ field เช่น ts เป็น timestamp และปลี่ยน format ใหม่ทำได้ดังนี้
+### การตั้งค่าอื่นๆ
 
-```go:logger/logger.go
+- **เปลี่ยนชื่อ field** เช่น ถ้าต้องการเปลี่ยนชื่อ field เช่น `ts` เป็น `timestamp` และปลี่ยน format ใหม่ทำได้ โดย `key = "NewKeyName"`
+
+```go
 func init() {
 	var err error
 
@@ -144,24 +159,28 @@ func init() {
 // {"level":"info","timestamp":"2022-02-01T15:04:40.736+0700","caller":"goapi/main.go:39","msg":"Starting server at port 8080"}
 ```
 
-<aside>
-💡 ถ้าไม่ต้องการให้แสดง key ไหนออกมาให้ใส่ `= ""` เช่น `encoderConfig.StacktraceKey = ""`
+- **ปิดการแสดงข้อมูล** ถ้าไม่ต้องการให้แสดง key ไหนออกมาให้ใส่ `key = ""` เช่น `encoderConfig.StacktraceKey = ""` ก็จะไม่แสดงข้อมูล `StacktraceKey` ออกมาแล้ว
+- **Dev mode** ในขณะที่กำลังพัฒนาอยู่ การแสดง log แบบ json อาจทำให้อ่านไม่สะดวก เราสามารถใช้แบบ Development Config แทนได้
 
-</aside>
-
-### ส่งต่อไป Elastic Search
-
-ถ้าหาก log ของเราต้องส่งไปยัง Elastic Search เพื่อให้ได้ format ที่ใช้งานได้เลยนั้น ต้องใช้ร่วมกับ plugin ECS loggers
-
-ติดตั้ง `go get go.elastic.co/ecszap`
-
-```go:logger/logger.go
+```diff
 func init() {
 	var err error
 
-	config := zap.NewProductionConfig()
-	config.EncoderConfig = ecszap.ECSCompatibleEncoderConfig(config.EncoderConfig)
-	log, err = config.Build(ecszap.WrapCoreOption(), zap.AddCallerSkip(1))
+  encoderConfig := zap.NewProductionEncoderConfig()
+	encoderConfig.TimeKey = "timestamp"
+	encoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
++	mode := os.Getenv("APP_MODE")
++	var config zap.Config
++	if mode == "production" {
++		config = zap.NewProductionConfig()
++	} else {
++		config = zap.NewDevelopmentConfig()
++	}
+
+	config.EncoderConfig = encoderConfig
+
+	log, err = config.Build(zap.AddCallerSkip(1))
 
 	if err != nil {
 		panic(err)
@@ -169,20 +188,24 @@ func init() {
 }
 ```
 
-### Dev Mode
+## ส่งต่อไป Elastic Search
 
-แต่ในขณะที่กำลังพัฒนาอยู่ การแสดง log แบบ json อาจทำให้อ่านไม่สะดวก เราสามารถใช้แบบ Development Config แทนได้
+ถ้าหาก log ของเราต้องส่งออกไปยัง Elastic Search ก็จำเป็นที่จะต้องกำหนดรูปแบบของ JSON ตาม \***\*Elastic Common Schema (ECS)\*\*** ซึ่งมี plugin ที่ชื่อว่า [ecszap](https://pkg.go.dev/go.elastic.co/ecszap) มาให้แล้ว เมื่อเรียกใช้งานก็จะได้ format ที่ถูกต้องเลย
 
-```go:logger/logger.go
+```go
+// go get go.elastic.co/ecszap
+
 func init() {
 	var err error
-	mode := os.Getenv("APP_ENV")
+
+  mode := os.Getenv("APP_MODE")
 	var config zap.Config
 	if mode == "production" {
 		config = zap.NewProductionConfig()
 	} else {
 		config = zap.NewDevelopmentConfig()
 	}
+
 	config.EncoderConfig = ecszap.ECSCompatibleEncoderConfig(config.EncoderConfig)
 	log, err = config.Build(ecszap.WrapCoreOption(), zap.AddCallerSkip(1))
 
@@ -192,24 +215,34 @@ func init() {
 }
 ```
 
-### การเพิ่ม transactionId
+### การแสดงข้อมูลเพิ่มเติม
 
-กรณีต้องการเพิ่ม transactionId ทำได้โดยใช้ `zap.String("transactionId", txId)` ส่งเพิ่มเข้าไปหลัง message เช่น
+เมื่อเราใช้งาน plugin [ecszap](https://pkg.go.dev/go.elastic.co/ecszap) แล้วนั้น ก็จะได้ format ตาม ECS เลย แต่หากเราต้องการให้แสดงข้อมูลเพิ่มเติม เช่น เพิ่มการแสดง Transaction ID ออกมาด้วย เราจะต้องสร้าง zap.Field ใหม่ขึ้นมา แล้วส่งไปพร้อมข้อความที่ต้องการแสดง
+
+- สร้าง filed ใหม่ เพื่อแสดง transactionId ทำได้โดยใช้ `zap.String("transactionId", txId)`
+- ส่งไปพร้อม message
 
 ```go
-if err := tx.Error; err != nil {
-	appErr := errs.NewUnexpectedError(err.Error())
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		appErr = errs.NewNotFoundError("todo with given id not found")
+func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
+	// ...
+  tx := database.DB.Create(&todo)
+  if err := tx.Error; err != nil {
+		appErr := errs.NewUnexpectedError(err.Error())
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			appErr = errs.NewNotFoundError("todo with given id not found")
+		}
+	  // กำหนดให้ส่ง X-Trasaction-Id เป็น uuid มาใน request header
+	  txId := r.Header.Get("X-Transaction-Id")
+		// สร้าง field ใหม่
+    txField := zap.String("transactionId", txId)
+    // ส่งไปพร้อมข้อความ
+		log.Error(appErr.Message, txField)
+
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(appErr.Code)
+		json.NewEncoder(w).Encode(appErr)
+		return
 	}
-  // กำหนดให้ส่ง x-trasaction-id เป็น uuid มาใน request header
-  txId := r.Header.Get("x-transaction-id")
-
-	log.Error(appErr.Message, zap.String("transactionId", txId))
-
-	w.Header().Add("Content-Type", "application/json")
-	w.WriteHeader(appErr.Code)
-	json.NewEncoder(w).Encode(appErr)
-	return
+  // ...
 }
 ```
