@@ -21,7 +21,7 @@ summary: 'ควรแสดง log อย่างไร'
 
 เราจะให้ Client ที่เรียกเข้ามาส่งค่า unique id มาให้ด้วยทุกครั้ง ผ่านมาทาง Request Header ที่ชื่อ `X-Trasaction-Id` แล้วฝั่ง Server เอาค่าที่ส่งมานั้นมาแสดงใน log ด้วย เช่น
 
-```go
+```go:pkg/handlers/todo.go
 func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
 	// ...
   tx := database.DB.Create(&todo)
@@ -70,7 +70,7 @@ go get -u go.uber.org/zap
 
 การใช้งาน เริ่มจากสร้าง logger module ของเราขึ้นมา แบบนี้
 
-```go
+```go:pkg/common/logger/logger.go
 package logger
 
 import (
@@ -118,8 +118,7 @@ func Panic(message string, fileds ...zap.Field) {
 
 และเปลี่ยนการ `log.Println()` มาเป็น `logger.Info()` แทน
 
-```go
-// main.go
+```go:cmd/main.go
 func main() {
   // ...
   logger.Info("Starting server at port 8080")
@@ -134,7 +133,7 @@ func main() {
 
 </aside>
 
-```diff
+```diff:pkg/common/logger/logger.go
 func init() {
 	var err error
 
@@ -151,7 +150,7 @@ func init() {
 
 - **เปลี่ยนชื่อ field** เช่น ถ้าต้องการเปลี่ยนชื่อ field เช่น `ts` เป็น `timestamp` และปลี่ยน format ใหม่ทำได้ โดย `key = "NewKeyName"`
 
-```go
+```go:pkg/common/logger/logger.go
 func init() {
 	var err error
 
@@ -174,7 +173,7 @@ func init() {
 - **ปิดการแสดงข้อมูล** ถ้าไม่ต้องการให้แสดง key ไหนออกมาให้ใส่ `key = ""` เช่น `encoderConfig.StacktraceKey = ""` ก็จะไม่แสดงข้อมูล `StacktraceKey` ออกมาแล้ว
 - **Dev mode** ในขณะที่กำลังพัฒนาอยู่ การแสดง log แบบ json อาจทำให้อ่านไม่สะดวก เราสามารถใช้แบบ Development Config แทนได้
 
-```diff
+```diff:pkg/common/logger/logger.go
 func init() {
 	var err error
 
@@ -204,7 +203,7 @@ func init() {
 
 ถ้าหาก log ของเราต้องส่งออกไปยัง Elastic Search ก็จำเป็นที่จะต้องกำหนดรูปแบบของ JSON ตาม **Elastic Common Schema (ECS)** ซึ่งมี plugin ที่ชื่อว่า [ecszap](https://pkg.go.dev/go.elastic.co/ecszap) มาให้แล้ว เมื่อเรียกใช้งานก็จะได้ format ที่ถูกต้องเลย
 
-```go
+```go:pkg/common/logger/logger.go
 // go get go.elastic.co/ecszap
 
 func init() {
@@ -234,7 +233,7 @@ func init() {
 - สร้าง filed ใหม่ เพื่อแสดง transactionId ทำได้โดยใช้ `zap.String("transactionId", txId)`
 - ส่งไปพร้อม message
 
-```go
+```go:pkg/handlers/todo.go
 func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
 	// ...
   tx := database.DB.Create(&todo)
@@ -265,7 +264,7 @@ func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
 
 - สร้าง Logger interface และใช้งานผ่านตัวแปรชื่อ Default แทน
 
-```go
+```go:pkg/common/logger/logger.go
 package logger
 
 import (
@@ -330,7 +329,7 @@ func NewWithFields(fileds map[string]interface{}) Logger {
 
 - สร้าง Logger โดยใช้ zap logger
 
-```go
+```go:pkg/common/logger/zap.go
 package logger
 
 import "go.uber.org/zap"
@@ -408,7 +407,7 @@ func (l *zapLogger) toZapFields(fileds map[string]interface{}) []zap.Field {
 
 - เมื่อใช้งาน logger module ให้เรียกผ่าน `logger.Default` เช่น
 
-```go
+```go:cmd/main.go
 func main() {
   // ...
   logger.Default.Info("Starting server at port 8080")
@@ -418,7 +417,7 @@ func main() {
 
 - ถ้าต้องการเพิ่ม fields เช่น `transactionId` ส่งเป็น `map[string]interface{}` ไปแทน
 
-```go
+```go:pkg/handlers/todo.go
 func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
 	// ...
   tx := database.DB.Create(&todo)
@@ -428,7 +427,7 @@ func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
 			appErr = errs.NewNotFoundError("todo with given id not found")
 		}
 	  // กำหนดให้ส่ง X-Trasaction-Id เป็น uuid มาใน request header
-	  txId := r.Header.Get("X-Transaction-Id")
+		txId := r.Header.Get("X-Transaction-Id")
 		// สร้าง field ใหม่
     fields := map[string]interface{}{}
 		fields["transactionId"] = txId

@@ -9,42 +9,45 @@ summary: 'สร้าง logger middlware เพื่อแสดง request l
 
 # Logger Middleware
 
-จากบทความที่ผ่านๆ มา ในส่วนของการแสดง request log นั้น รูปแบบของ log ยังไม่เป็น JSON เหมือนกับ log ในส่วนอื่นๆ ที่ใช้ [logger module](https://somprasongd.work/blog/go/golang-api-p5-log)
+จากบทความที่ผ่านๆ มามีการใช้ [logger middleware](https://docs.gofiber.io/api/middleware/logger) ของ fiber เพื่อแสดงข้อมูลของ request และ response แต่ปัญหาอย่างหนึ่ง คือ มันแสดงออกมาเป็นข้อความธรรมดา ซึ่งจากบทความความเรื่อง [logger module](https://somprasongd.work/blog/go/golang-api-p5-log) การแสดง log ของเราควรมีรูปแบบเป็น JSON เพื่อให้นำเอาไปใช้งานต่อได้
 
 ดังนั้นในบทความนี้จะมาสร้าง logger middleware ขึ้นมาเอง เพื่อให้แสดง request log ได้ถูกต้อง
 
-## สร้าง Logger Middleware
+## Logger Middleware ของ Fiber
 
-จากบทความก่อนหน้าได้ใช้ fiber framework ดังนั้นในบทความนี้ก็จะใช้ fiber เหมือนกัน
+มาดูกันก่อนว่า [logger middleware](https://docs.gofiber.io/api/middleware/logger) ของ fiber ใช้งานยังไง ซึ่งตัวมันเองสามารถปรับเปลี่ยนรูปแบบของข้อมูลที่ต้องการแสดงได้ เช่น เพิ่มให้แสดง ip, port และ request id ออกมา
 
-- โค้ดแบบใช้ logger middleware ของ fiber
-
-```go
+```go:cmd/api/main.go
 func main() {
 	app := fiber.New()
 
 	app.Use(requestid.New())
-	app.Use(logger.New())
+
+	app.Use(logger.New(logger.Config{
+		Format: "[${ip}]:${port} ${locals:requestid} ${status} - ${method} ${path}\n",
+	}))
 
 	app.Get("/", func(c *fiber.Ctx) error {
 		return c.SendString("Hello, World!")
 	})
 
-	logger.Default.Info("start on port 3000")
-
 	app.Listen(":3000")
 }
 ```
 
-- เมื่อมี request เรียกเข้ามา จะแสดง log แบบนี้ ซึ่งไม่ใช้ format ตามที่เราต้องการ
+เมื่อมี request เรียกเข้ามา จะแสดง log แบบนี้
 
 ```bash
-20:48:32 | 200 |      0s |       127.0.0.1 | GET     | /
+[127.0.0.1]:50462 d69ecd6d-7de4-46bc-845f-ad5f4fc4043c  200  -  GET      /
 ```
 
-- แก้โดยสร้าง logger middleware ของเราขึ้นมาเอง
+ซึ่งก็ยังเป็นข้อความธรรมดา ไม่ใช้ format ตามที่เราต้องการ
 
-```go
+## เปลี่ยนเป็น JSON Format
+
+การที่จะเปลี่ยนการแสดงข้อมูลให้เป็น JSON Format เราจะต้องสร้าง logger middleware ของเราขึ้นมาเอง ซึ่ง fiber มีวิธีการสร้าง แบบนี้
+
+```go:cmd/api/main.go
 func main() {
 	app := fiber.New()
 
@@ -65,21 +68,30 @@ func logMiddleware(c *fiber.Ctx) error {
 }
 ```
 
-- แล้วกำหนดรูปแแบบข้อความ log ที่ต้องการ เช่น `"[ip]:port status - method path (duration)"` ก็จะทำแบบนี้
+แล้วกำหนดรูปแแบบข้อความ log ที่ต้องการ เช่น `"[ip]:port status - method path (duration)"` ส่วน request id เพื่อให้เหมือน log ส่วนๆ อื่นจะแสดงผ่าน field ใหม่ รวมถึง ip, port แล้ว
 
-```go
+```go:cmd/api/main.go
 func logMiddleware(c *fiber.Ctx) error {
 	start := time.Now()
 
 	c.Next()
 
-	// "[ip]:port status - method path (duration)"
-	logger.Default.Info(fmt.Sprintf("[%v]:%v %v - %v %v (%v)", c.IP(), c.Port(), c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start)))
-	return nil
+  fileds := map[string]interface{}{}
+	fileds["ip"] = c.IP()
+	fileds["port"] = c.Port()
+	fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
+
+  // msg ไม่ต้องแสดง ip, port, requestid แล้ว
+  // "status - method path (duration)"
+	msg := fmt.Sprintf("%v - %v %v (%v)", c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start))
+
+  logger.Default.InfoWithFields(msg, fileds)
+
+  return nil
 }
 ```
 
-- เมื่อมี request เรียกเข้ามาก็จะได้ log ในรูปแบบของ JSON แล้ว
+เมื่อมี request เรียกเข้ามาก็จะได้ log ในรูปแบบของ JSON แล้ว
 
 ```json
 {
@@ -89,53 +101,72 @@ func logMiddleware(c *fiber.Ctx) error {
     "file.name": "api/main.go",
     "file.line": 40
   },
-  "message": "[127.0.0.1]:49930 200 - GET / (149.514µs)",
+  "message": "200 - GET / (153.224µs)",
+  "ip": "127.0.0.1",
+  "port": "50838",
+  "requestid": "e9acc16d-00a2-4ad8-b960-1d49dd95853b",
   "ecs.version": "1.6.0"
 }
 ```
 
 ## สร้าง Logger ส่งไปให้ Handler
 
-ในบทความก่อนๆ เราจะมีการแสดง request id ออกมาใน log ด้วย ซึ่งจะมีการดึงค่า request id ออกมาจากในทุกๆ handler ดังนั้นเราจะใช้ logger middleware ของเรา ดึงค่านี้ออกมาแทน แล้วทำการสร้าง Logger ตัวใหม่พร้อมทั้งกำหนด fields ที่ต้องการไปให้เรียบร้อย แล้วใน handler ก็แค่เอา logger ตัวนี้มาใช้ง่ายเลย
+ปัญหาอีกอย่างหนึ่ง เมื่อเรากำหนดรูปแบบของ log ให้แสดง ip, port และ request id ออกมาด้วยทุกครั้ง ทำให้ต้องมีการสร้าง fields เหล่านี้ ในทุกๆ handler
 
-- เริ่มจากแก้ไข logger middleware ให้ดึงทุกค่าจาก request ที่จะเอาไปแสดงใน log ออกมา แล้วเอามาใส่ไว้ใน `map[string]interface{}` เช่น
+```go
+fileds := map[string]interface{}{}
+fileds["ip"] = c.IP()
+fileds["port"] = c.Port()
+fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
+```
 
-```diff
+ซึ่งมีโอกาศผิดพลาดตกหล่นได้ หรือถ้าในอนาคตมีการเพิ่ม หรือลดข้อมูลที่จะแสดงก็ต้องเข้าไปแก้ในทุกๆ handlers
+
+เพื่อแก้ปัญหาดังกล่าว เราจะใช้ logger middleware ของเรา สร้าง fields ทุกอย่างที่ต้องใช้จาก Request แล้วเอาไปสร้าง logger ตัวใหม่ แยกไปกับ request แต่ละตัวไปเลย แล้วใน handler ก็แค่เอา logger ตัวนี้มาใช้งานแสดง message ก็จะได้ fields ทุกอย่างตามที่ส่งมาเลย มีขั้นตอนดังนี้
+
+- เริ่มจากแก้ไข logger middleware ให้ดึงทุกค่าจาก request ที่จะเอาไปแสดงใน log ออกมา แล้วเอามาใส่ไว้ใน `map[string]interface{}` เช่น จากโค้ดด้านบนให้ย้าย fields มาอยู่ก่อน `c.Next()`
+
+```go:cmd/api/main.go
 func logMiddleware(c *fiber.Ctx) error {
 	start := time.Now()
 
-+	fileds := map[string]interface{}{}
-+	fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
-+	fileds["traceid"] = c.GetRespHeaders()["TraceId"]
-+	fileds["spanid"] = c.GetRespHeaders()["SpanId"]
+  fileds := map[string]interface{}{}
+	fileds["ip"] = c.IP()
+	fileds["port"] = c.Port()
+	fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
 
 	c.Next()
 
-	// "[ip]:port status - method path (duration)"
-	logger.Default.Info(fmt.Sprintf("[%v]:%v %v - %v %v (%v)", c.IP(), c.Port(), c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start)))
-	return nil
+  // msg ไม่ต้องแสดง ip, port, requestid แล้ว
+  // "status - method path (duration)"
+	msg := fmt.Sprintf("%v - %v %v (%v)", c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start))
+
+  logger.Default.InfoWithFields(msg, fileds)
+
+  return nil
 }
 ```
 
 - สร้าง Logger ใหม่พร้อม fields ทั้งหมด สำหรับ request แต่ละครั้งขึ้นมา
 
-```diff
+```diff:cmd/api/main.go
 func logMiddleware(c *fiber.Ctx) error {
 	start := time.Now()
 
-	fileds := map[string]interface{}{}
+  fileds := map[string]interface{}{}
+	fileds["ip"] = c.IP()
+	fileds["port"] = c.Port()
 	fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
-	fileds["traceid"] = c.GetRespHeaders()["TraceId"]
-	fileds["spanid"] = c.GetRespHeaders()["SpanId"]
 
-+  log := logger.NewWithFields(fileds)
++ log := logger.NewWithFields(fileds)
 
 	c.Next()
 
-	// "[ip]:port status - method path (duration)"
--	logger.Default.Info(fmt.Sprintf("[%v]:%v %v - %v %v (%v)", c.IP(), c.Port(), c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start)))
-+ // เปลี่ยนมาใช้ log จะได้แสดงข้อมูลจาก fields ด้วย
-+	log.Info(fmt.Sprintf("[%v]:%v %v - %v %v (%v)", c.IP(), c.Port(), c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start)))
+  // msg ไม่ต้องแสดง ip, port, requestid แล้ว
+  // "status - method path (duration)"
+	msg := fmt.Sprintf("%v - %v %v (%v)", c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start))
+
+  logger.Default.InfoWithFields(msg, fileds)
 
   return nil
 }
@@ -143,14 +174,14 @@ func logMiddleware(c *fiber.Ctx) error {
 
 - ส่ง logger ที่สร้างไปกลับ request
 
-```diff
+```diff:cmd/api/main.go
 func logMiddleware(c *fiber.Ctx) error {
 	start := time.Now()
 
 	fileds := map[string]interface{}{}
+	fileds["ip"] = c.IP()
+	fileds["port"] = c.Port()
 	fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
-	fileds["traceid"] = c.GetRespHeaders()["TraceId"]
-	fileds["spanid"] = c.GetRespHeaders()["SpanId"]
 
   log := logger.NewWithFields(fileds)
 
@@ -158,49 +189,90 @@ func logMiddleware(c *fiber.Ctx) error {
 
 	c.Next()
 
-	// "[ip]:port status - method path (duration)"
-	log.Info(fmt.Sprintf("[%v]:%v %v - %v %v (%v)", c.IP(), c.Port(), c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start)))
-	return nil
+	// msg ไม่ต้องแสดง ip, port, requestid แล้ว
+  // "status - method path (duration)"
+	msg := fmt.Sprintf("%v - %v %v (%v)", c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start))
+
+  logger.Default.InfoWithFields(msg, fileds)
+
+  return nil
 }
 ```
 
-- เท่านี้เราก็สามารถเรียกใช้ logger ของแต่ละ request ได้จาก handler เลย
+- แล้วเปลี่ยน logger.Default.InfoWithFields มาใช้ log ตัวใหม่ที่สร้างขึ้นมาแทน
 
-```go
+```diff:cmd/api/main.go
+func logMiddleware(c *fiber.Ctx) error {
+	start := time.Now()
+
+	fileds := map[string]interface{}{}
+	fileds["ip"] = c.IP()
+	fileds["port"] = c.Port()
+	fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
+
+  log := logger.NewWithFields(fileds)
+
++ c.Locals("log", log)
+
+	c.Next()
+
+	// msg ไม่ต้องแสดง ip, port, requestid แล้ว
+  // "status - method path (duration)"
+	msg := fmt.Sprintf("%v - %v %v (%v)", c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start))
+
+- logger.Default.InfoWithFields(msg, fileds)
++ log.Info(msg)
+
+  return nil
+}
+```
+
+- เมื่อจะใช้งาน log ใน handler ทำได้โดย
+
+```go:cmd/api/main.go
 app.Get("/", func(c *fiber.Ctx) error {
+  // ดึงออกมาจาก c.Locals
 	log := c.Locals("log").(logger.Logger)
+
 	log.Info("log in handler")
+
 	return c.SendString("Hello, World!")
 })
 ```
 
-- เมื่อมี request เข้ามา ก็จะได้ log ของ request นั้นๆ เลย
+- เมื่อมี request เข้ามา ก็จะได้ log ที่มีข้อมูล fields ทุกอย่างๆ แยกตาม request นั้นๆ เลย
 
 ```json
 {
-   "log.level":"info",
-   "@timestamp":"2022-08-09T21:08:43.714+0700",
-   "log.origin":{
-      "file.name":"api/main.go",
-      "file.line":20
-   },
-   "message":"log in handler",
-   "requestid":"59d071bd-c1a4-45a9-a952-24549eae462d",
-   "ecs.version":"1.6.0"
+	"log.level":"info",
+	"@timestamp":"2022-08-09T21:08:43.714+0700",
+	"log.origin":{
+		"file.name":"api/main.go",
+		"file.line":20
+	},
+	"message":"log in handler",
+	"ip":"127.0.0.1",
+	"port":"50888",
+	"requestid":"59d071bd-c1a4-45a9-a952-24549eae462d",
+	"ecs.version":"1.6.0"
 }
 {
-   "log.level":"info",
-   "@timestamp":"2022-08-09T21:08:43.714+0700",
-   "log.origin":{
-      "file.name":"api/main.go",
-      "file.line":42
-   },
-   "message":"[127.0.0.1]:50236 200 - GET / (146.428µs)",
-   "requestid":"59d071bd-c1a4-45a9-a952-24549eae462d",
-   "ecs.version":"1.6.0"
+	"log.level":"info",
+	"@timestamp":"2022-08-09T21:08:43.714+0700",
+	"log.origin":{
+		"file.name":"api/main.go",
+		"file.line":45
+	},
+	"message":"200 - GET / (146.428µs)",
+	"ip":"127.0.0.1",
+	"port":"50888",
+	"requestid":"59d071bd-c1a4-45a9-a952-24549eae462d",
+	"ecs.version":"1.6.0"
 }
 ```
 
-- จะเห็น log ทั้งสองตัวจะมี request id เดียวกัน
+## สรุป
+
+การสร้าง logger module ขึ้นมาเองเนื่องจาก เพื่อต้องการเปลี่ยนรูปแบบของ request, response log ให้เป็น JSON Format แล้วยังสามารถใช้สร้าง logger แยกตาม request พร้อมกำหนด fields ต่างๆ ที่ต้องดึงอ่านออกมาจาก request ให่เรียบร้อย ทำให้ไม่ต้องไปดึงค่าใน handler เพื่อลดความผิดพลาด และสะดวกในการแก้ในอนาคตด้วย
 
 ดูโค้ดทั้งหมดได้[ที่นี่](https://github.com/somprasongd/blog-golang/tree/main/goapi-log)
