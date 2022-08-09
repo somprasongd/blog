@@ -31,7 +31,7 @@ func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
 			appErr = errs.NewNotFoundError("todo with given id not found")
 		}
 	  // กำหนดให้ส่ง X-Trasaction-Id เป็น uuid มาใน request header
-	  txId := r.Header.Get("X-Transaction-Id")
+		txId := r.Header.Get("X-Transaction-Id")
 		log.Println(txId, appErr.Message)
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(appErr.Code)
@@ -44,7 +44,7 @@ func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
 // 2022/02/01 11:07:10 833d57ef-afb9-45c1-8450-9eff6559043e todo with given id not found
 ```
 
-## กำหนดรูปแบบของการแสดง Log
+## กำหนดรูปแบบของการแสดง **Log**
 
 ถ้าเราแสดง log ออกมาเป็นข้อความธรรมดานั้น เวลาที่ส่งต่อไปยังโปรแกรมอื่น เช่น ELK เราก็เอาไปใช้งานต่อลำบาก ค้นหาก็ยาก ดังนั้นเรามีการกำหนดรูปแบบการแสดง log ของเรา เช่น ให้แสดงออกมาเป็น JSON แทน เช่น
 
@@ -79,12 +79,12 @@ import (
 	"go.uber.org/zap"
 )
 
-var log *zap.Logger
+var zlog *zap.Logger
 
 func init() {
 	var err error
 
-	log, err = zap.NewProduction()
+	zlog, err = zap.NewProduction()
 
 	if err != nil {
 		panic(err)
@@ -92,15 +92,27 @@ func init() {
 }
 
 func Info(message string, fileds ...zap.Field) {
-	log.Info(message, fileds...)
+	zlog.Info(message, fileds...)
 }
 
 func Debug(message string, fileds ...zap.Field) {
-	log.Debug(message, fileds...)
+	zlog.Debug(message, fileds...)
 }
 
 func Error(message string, fileds ...zap.Field) {
-	log.Error(message, fileds...)
+	zlog.Error(message, fileds...)
+}
+
+func Warn(message string, fileds ...zap.Field) {
+	zlog.Warn(message, fileds...)
+}
+
+func Fatal(message string, fileds ...zap.Field) {
+	zlog.Fatal(message, fileds...)
+}
+
+func Panic(message string, fileds ...zap.Field) {
+	zlog.Panic(message, fileds...)
 }
 ```
 
@@ -126,7 +138,7 @@ func main() {
 func init() {
 	var err error
 
--  log, err = zap.NewProduction()
+- log, err = zap.NewProduction()
 +	log, err = zap.NewProduction(zap.AddCallerSkip(1))
 
 	if err != nil {
@@ -190,7 +202,7 @@ func init() {
 
 ## ส่งต่อไป Elastic Search
 
-ถ้าหาก log ของเราต้องส่งออกไปยัง Elastic Search ก็จำเป็นที่จะต้องกำหนดรูปแบบของ JSON ตาม \***\*Elastic Common Schema (ECS)\*\*** ซึ่งมี plugin ที่ชื่อว่า [ecszap](https://pkg.go.dev/go.elastic.co/ecszap) มาให้แล้ว เมื่อเรียกใช้งานก็จะได้ format ที่ถูกต้องเลย
+ถ้าหาก log ของเราต้องส่งออกไปยัง Elastic Search ก็จำเป็นที่จะต้องกำหนดรูปแบบของ JSON ตาม **Elastic Common Schema (ECS)** ซึ่งมี plugin ที่ชื่อว่า [ecszap](https://pkg.go.dev/go.elastic.co/ecszap) มาให้แล้ว เมื่อเรียกใช้งานก็จะได้ format ที่ถูกต้องเลย
 
 ```go
 // go get go.elastic.co/ecszap
@@ -232,11 +244,196 @@ func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
 			appErr = errs.NewNotFoundError("todo with given id not found")
 		}
 	  // กำหนดให้ส่ง X-Trasaction-Id เป็น uuid มาใน request header
-	  txId := r.Header.Get("X-Transaction-Id")
+		txId := r.Header.Get("X-Transaction-Id")
 		// สร้าง field ใหม่
     txField := zap.String("transactionId", txId)
     // ส่งไปพร้อมข้อความ
-		log.Error(appErr.Message, txField)
+		logger.Error(appErr.Message, txField)
+
+		w.Header().Add("Content-Type", "application/json")
+		w.WriteHeader(appErr.Code)
+		json.NewEncoder(w).Encode(appErr)
+		return
+	}
+  // ...
+}
+```
+
+## Final logger module
+
+ปรับโค้ด logger module ใหม่ ให้รองรับ dev mode และส่งออกไป Elastic Search จะกำหนดฟังก์ชันใช้ผ่าน interface จะได้ออกมาแบบนี้
+
+- สร้าง Logger interface และใช้งานผ่านตัวแปรชื่อ Default แทน
+
+```go
+package logger
+
+import (
+	"os"
+
+	"go.elastic.co/ecszap"
+	"go.uber.org/zap"
+)
+
+type Logger interface {
+	Info(msg string)
+	InfoWithFields(msg string, fileds map[string]interface{})
+	Debug(msg string)
+	DebugWithFields(msg string, fileds map[string]interface{})
+	Error(msg string)
+	ErrorWithFields(msg string, fileds map[string]interface{})
+	Warn(msg string)
+	WarnWithFields(msg string, fileds map[string]interface{})
+	Fatal(msg string)
+	FatalWithFields(msg string, fileds map[string]interface{})
+	Panic(msg string)
+	PanicWithFields(msg string, fileds map[string]interface{})
+}
+
+var zlog *zap.Logger
+var Default Logger
+
+func init() {
+	var err error
+
+	mode := os.Getenv("APP_MODE")
+
+	var config zap.Config
+	if mode == "production" {
+		config = zap.NewProductionConfig()
+	} else {
+		config = zap.NewDevelopmentConfig()
+	}
+
+	config.EncoderConfig = ecszap.ECSCompatibleEncoderConfig(config.EncoderConfig)
+
+	zlog, err = config.Build(ecszap.WrapCoreOption(), zap.AddCallerSkip(1))
+
+	if err != nil {
+		panic(err)
+	}
+
+	Default = newZapLogger(zlog)
+}
+
+// ใช้สร้าง Logger ใหม่ โดยจะทำการ clone จากตัวเดิม
+func NewWithFields(fileds map[string]interface{}) Logger {
+	opts := []zap.Field{}
+	for k, v := range fileds {
+		opts = append(opts, zap.Any(k, v))
+	}
+
+	nlog := zlog.With(opts...)
+	return newZapLogger(nlog)
+}
+```
+
+- สร้าง Logger โดยใช้ zap logger
+
+```go
+package logger
+
+import "go.uber.org/zap"
+
+type zapLogger struct {
+	*zap.Logger
+}
+
+func newZapLogger(logger *zap.Logger) Logger {
+	return &zapLogger{logger}
+}
+
+func (l *zapLogger) Info(msg string) {
+	l.Logger.Info(msg)
+}
+
+func (l *zapLogger) InfoWithFields(msg string, fileds map[string]interface{}) {
+	zf := l.toZapFields(fileds)
+	l.Logger.Info(msg, zf...)
+}
+
+func (l *zapLogger) Debug(msg string) {
+	l.Logger.Debug(msg)
+}
+
+func (l *zapLogger) DebugWithFields(msg string, fileds map[string]interface{}) {
+	zf := l.toZapFields(fileds)
+	l.Logger.Debug(msg, zf...)
+}
+
+func (l *zapLogger) Error(msg string) {
+	l.Logger.Error(msg)
+}
+
+func (l *zapLogger) ErrorWithFields(msg string, fileds map[string]interface{}) {
+	zf := l.toZapFields(fileds)
+	l.Logger.Error(msg, zf...)
+}
+
+func (l *zapLogger) Warn(msg string) {
+	l.Logger.Warn(msg)
+}
+
+func (l *zapLogger) WarnWithFields(msg string, fileds map[string]interface{}) {
+	zf := l.toZapFields(fileds)
+	l.Logger.Warn(msg, zf...)
+}
+
+func (l *zapLogger) Fatal(msg string) {
+	l.Logger.Fatal(msg)
+}
+
+func (l *zapLogger) FatalWithFields(msg string, fileds map[string]interface{}) {
+	zf := l.toZapFields(fileds)
+	l.Logger.Fatal(msg, zf...)
+}
+
+func (l *zapLogger) Panic(msg string) {
+	l.Logger.Panic(msg)
+}
+
+func (l *zapLogger) PanicWithFields(msg string, fileds map[string]interface{}) {
+	zf := l.toZapFields(fileds)
+	l.Logger.Panic(msg, zf...)
+}
+
+func (l *zapLogger) toZapFields(fileds map[string]interface{}) []zap.Field {
+	fz := []zap.Field{}
+	for k, v := range fileds {
+		fz = append(fz, zap.Any(k, v))
+	}
+	return fz
+}
+```
+
+- เมื่อใช้งาน logger module ให้เรียกผ่าน `logger.Default` เช่น
+
+```go
+func main() {
+  // ...
+  logger.Default.Info("Starting server at port 8080")
+	log.Fatal(http.ListenAndServe(":8080", handler))
+}
+```
+
+- ถ้าต้องการเพิ่ม fields เช่น `transactionId` ส่งเป็น `map[string]interface{}` ไปแทน
+
+```go
+func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
+	// ...
+  tx := database.DB.Create(&todo)
+  if err := tx.Error; err != nil {
+		appErr := errs.NewUnexpectedError(err.Error())
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			appErr = errs.NewNotFoundError("todo with given id not found")
+		}
+	  // กำหนดให้ส่ง X-Trasaction-Id เป็น uuid มาใน request header
+	  txId := r.Header.Get("X-Transaction-Id")
+		// สร้าง field ใหม่
+    fields := map[string]interface{}{}
+		fields["transactionId"] = txId
+    // ส่งไปพร้อมข้อความ
+		logger.Default.Error(appErr.Message, fields)
 
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(appErr.Code)
