@@ -1,7 +1,7 @@
 ---
 title: 'API Service with Go: Logger Middleware'
 date: '2022-08-09'
-lastmod: '2022-08-09'
+lastmod: '2022-08-15'
 tags: ['log', 'middleware', 'go']
 draft: false
 summary: 'สร้าง logger middlware เพื่อแสดง request log แบบ JSON'
@@ -68,26 +68,26 @@ func logMiddleware(c *fiber.Ctx) error {
 }
 ```
 
-แล้วกำหนดรูปแแบบข้อความ log ที่ต้องการ เช่น `"[ip]:port status - method path (duration)"` ส่วน request id เพื่อให้เหมือน log ส่วนๆ อื่นจะแสดงผ่าน field ใหม่ รวมถึง ip, port แล้ว
+ส่วนข้อความของ log เช่น "[ip]:port status - method path (latency)" แทนที่จะแสดงออกมาทาง message ก็เปลี่ยนให้แสดงเป็น field แทน
 
 ```go:cmd/api/main.go
 func logMiddleware(c *fiber.Ctx) error {
 	start := time.Now()
 
-	c.Next()
+	err := c.Next()
 
-  fileds := map[string]interface{}{}
-	fileds["ip"] = c.IP()
-	fileds["port"] = c.Port()
-	fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
+	fileds := map[string]interface{}{
+    "requestId": c.GetRespHeader("X-Request-ID"),
+		"ip":        c.IP(),
+		"method":    c.Method(),
+		"uri":       c.Path(),
+		"status":    c.Response().StatusCode(),
+		"latency":   time.Since(start),
+	}
 
-  // msg ไม่ต้องแสดง ip, port, requestid แล้ว
-  // "status - method path (duration)"
-	msg := fmt.Sprintf("%v - %v %v (%v)", c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start))
+	logger.Default.Info("", logger.ToFields(fileds)...)
 
-  logger.Default.InfoWithFields(msg, fileds)
-
-  return nil
+	return err
 }
 ```
 
@@ -96,28 +96,33 @@ func logMiddleware(c *fiber.Ctx) error {
 ```json
 {
   "log.level": "info",
-  "@timestamp": "2022-08-09T20:51:17.739+0700",
+  "@timestamp": "2022-08-15T14:17:08.397+0700",
   "log.origin": {
     "file.name": "api/main.go",
-    "file.line": 40
+    "file.line": 42
   },
-  "message": "200 - GET / (153.224µs)",
+  "message": "",
+  "status": 200,
+  "latency": 0,
+  "requestId": "b867ca47-422c-4e1b-a1bf-93ec638c53be",
   "ip": "127.0.0.1",
-  "port": "50838",
-  "requestid": "e9acc16d-00a2-4ad8-b960-1d49dd95853b",
+  "method": "GET",
+  "uri": "/",
   "ecs.version": "1.6.0"
 }
 ```
 
 ## สร้าง Logger ส่งไปให้ Handler
 
-ปัญหาอีกอย่างหนึ่ง เมื่อเรากำหนดรูปแบบของ log ให้แสดง ip, port และ request id ออกมาด้วยทุกครั้ง ทำให้ต้องมีการสร้าง fields เหล่านี้ ในทุกๆ handler
+ปัญหาอีกอย่างหนึ่ง เมื่อเรากำหนดรูปแบบของ log ให้แสดง ip, method, path และ request id ออกมาด้วยทุกครั้ง ทำให้ต้องมีการสร้าง fields เหล่านี้ ในทุกๆ handler
 
 ```go
-fileds := map[string]interface{}{}
-fileds["ip"] = c.IP()
-fileds["port"] = c.Port()
-fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
+fileds := map[string]interface{}{
+  "requestId": c.GetRespHeader("X-Request-ID"),
+	"ip":        c.IP(),
+	"method":    c.Method(),
+	"uri":       c.Path(),
+}
 ```
 
 ซึ่งมีโอกาศผิดพลาดตกหล่นได้ หรือถ้าในอนาคตมีการเพิ่ม หรือลดข้อมูลที่จะแสดงก็ต้องเข้าไปแก้ในทุกๆ handlers
@@ -130,20 +135,32 @@ fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
 func logMiddleware(c *fiber.Ctx) error {
 	start := time.Now()
 
-  fileds := map[string]interface{}{}
-	fileds["ip"] = c.IP()
-	fileds["port"] = c.Port()
-	fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
+  appName := os.Getenv("APP_NAME")
 
-	c.Next()
+	if len(appName) == 0 {
+		appName = "goapi"
+	}
 
-  // msg ไม่ต้องแสดง ip, port, requestid แล้ว
-  // "status - method path (duration)"
-	msg := fmt.Sprintf("%v - %v %v (%v)", c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start))
+	fileds := map[string]interface{}{
+		"app":       appName,
+		"domain":    c.Hostname(),
+		"requestId": c.GetRespHeader("X-Request-ID"),
+		"userAgent": c.Get("User-Agent"),
+		"ip":        c.IP(),
+		"method":    c.Method(),
+		"traceId":   c.Get("X-B3-Traceid"),
+		"spanId":    c.Get("X-B3-Spanid"),
+		"uri":       c.Path(),
+	}
 
-  logger.Default.InfoWithFields(msg, fileds)
+	err := c.Next()
 
-  return nil
+  fileds["status"] = c.Response().StatusCode()
+	fileds["latency"] = time.Since(start)
+
+	logger.Default.Info("", logger.ToFields(fileds)...)
+
+  return err
 }
 ```
 
@@ -158,17 +175,16 @@ func logMiddleware(c *fiber.Ctx) error {
 	fileds["port"] = c.Port()
 	fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
 
-+ log := logger.NewWithFields(fileds)
++ log := logger.New(logger.ToFields(fileds)...)
 
-	c.Next()
+	err := c.Next()
 
-  // msg ไม่ต้องแสดง ip, port, requestid แล้ว
-  // "status - method path (duration)"
-	msg := fmt.Sprintf("%v - %v %v (%v)", c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start))
+  fileds["status"] = c.Response().StatusCode()
+	fileds["latency"] = time.Since(start)
 
-  logger.Default.InfoWithFields(msg, fileds)
+	logger.Default.Info("", logger.ToFields(fileds)...)
 
-  return nil
+  return err
 }
 ```
 
@@ -187,43 +203,14 @@ func logMiddleware(c *fiber.Ctx) error {
 
 + c.Locals("log", log)
 
-	c.Next()
+	err := c.Next()
 
-	// msg ไม่ต้องแสดง ip, port, requestid แล้ว
-  // "status - method path (duration)"
-	msg := fmt.Sprintf("%v - %v %v (%v)", c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start))
+	fileds["status"] = c.Response().StatusCode()
+	fileds["latency"] = time.Since(start)
 
-  logger.Default.InfoWithFields(msg, fileds)
+	logger.Default.Info("", logger.ToFields(fileds)...)
 
-  return nil
-}
-```
-
-- แล้วเปลี่ยน logger.Default.InfoWithFields มาใช้ log ตัวใหม่ที่สร้างขึ้นมาแทน
-
-```diff:cmd/api/main.go
-func logMiddleware(c *fiber.Ctx) error {
-	start := time.Now()
-
-	fileds := map[string]interface{}{}
-	fileds["ip"] = c.IP()
-	fileds["port"] = c.Port()
-	fileds["requestid"] = c.GetRespHeaders()["X-Request-Id"]
-
-  log := logger.NewWithFields(fileds)
-
-+ c.Locals("log", log)
-
-	c.Next()
-
-	// msg ไม่ต้องแสดง ip, port, requestid แล้ว
-  // "status - method path (duration)"
-	msg := fmt.Sprintf("%v - %v %v (%v)", c.Response().StatusCode(), c.Method(), c.Path(), time.Since(start))
-
-- logger.Default.InfoWithFields(msg, fileds)
-+ log.Info(msg)
-
-  return nil
+  return err
 }
 ```
 
@@ -245,28 +232,42 @@ app.Get("/", func(c *fiber.Ctx) error {
 ```json
 {
 	"log.level":"info",
-	"@timestamp":"2022-08-09T21:08:43.714+0700",
+	"@timestamp":"2022-08-15T14:28:02.925+0700",
 	"log.origin":{
 		"file.name":"api/main.go",
 		"file.line":20
 	},
 	"message":"log in handler",
+	"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36",
+	"traceId":"",
+	"app":"goapi",
+	"domain":"127.0.0.1:3000",
+	"requestId":"71a494ca-41ea-43b7-a75a-569c2498c910",
+	"uri":"/",
 	"ip":"127.0.0.1",
-	"port":"50888",
-	"requestid":"59d071bd-c1a4-45a9-a952-24549eae462d",
+	"method":"GET",
+	"spanId":"",
 	"ecs.version":"1.6.0"
 }
 {
 	"log.level":"info",
-	"@timestamp":"2022-08-09T21:08:43.714+0700",
+	"@timestamp":"2022-08-15T14:28:02.926+0700",
 	"log.origin":{
 		"file.name":"api/main.go",
-		"file.line":45
+		"file.line":59
 	},
-	"message":"200 - GET / (146.428µs)",
+	"message":"",
 	"ip":"127.0.0.1",
-	"port":"50888",
-	"requestid":"59d071bd-c1a4-45a9-a952-24549eae462d",
+	"method":"GET",
+	"spanId":"",
+	"uri":"/",
+	"status":200,
+	"latency":0.0009283,
+	"app":"goapi",
+	"domain":"127.0.0.1:3000",
+	"requestId":"71a494ca-41ea-43b7-a75a-569c2498c910",
+	"userAgent":"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/104.0.0.0 Safari/537.36",
+	"traceId":"",
 	"ecs.version":"1.6.0"
 }
 ```

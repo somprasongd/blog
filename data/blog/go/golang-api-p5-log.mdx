@@ -1,7 +1,7 @@
 ---
 title: 'API Service with Go: Logging'
 date: '2022-02-05'
-lastmod: '2022-08-09'
+lastmod: '2022-08-15'
 tags: ['api', 'go', 'log']
 draft: false
 summary: 'ควรแสดง log อย่างไร'
@@ -272,25 +272,22 @@ import (
 
 	"go.elastic.co/ecszap"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
-type Logger interface {
-	Info(msg string)
-	InfoWithFields(msg string, fileds map[string]interface{})
-	Debug(msg string)
-	DebugWithFields(msg string, fileds map[string]interface{})
-	Error(msg string)
-	ErrorWithFields(msg string, fileds map[string]interface{})
-	Warn(msg string)
-	WarnWithFields(msg string, fileds map[string]interface{})
-	Fatal(msg string)
-	FatalWithFields(msg string, fileds map[string]interface{})
-	Panic(msg string)
-	PanicWithFields(msg string, fileds map[string]interface{})
+type Field = zapcore.Field
+
+type Interface interface {
+	Info(msg string, fileds ...Field)
+	Debug(msg string, fileds ...Field)
+	Error(msg string, fileds ...Field)
+	Warn(msg string, fileds ...Field)
+	Fatal(msg string, fileds ...Field)
+	Panic(msg string, fileds ...Field)
 }
 
 var zlog *zap.Logger
-var Default Logger
+var Default Interface
 
 func init() {
 	var err error
@@ -315,15 +312,17 @@ func init() {
 	Default = newZapLogger(zlog)
 }
 
-// ใช้สร้าง Logger ใหม่ โดยจะทำการ clone จากตัวเดิม
-func NewWithFields(fileds map[string]interface{}) Logger {
-	opts := []zap.Field{}
-	for k, v := range fileds {
-		opts = append(opts, zap.Any(k, v))
-	}
-
-	nlog := zlog.With(opts...)
+func New(fileds ...Field) Interface {
+	nlog := zlog.With(fileds...)
 	return newZapLogger(nlog)
+}
+
+func ToFields(source map[string]interface{}) []Field {
+	fields := []Field{}
+	for k, v := range source {
+		fields = append(fields, zap.Any(k, v))
+	}
+	return fields
 }
 ```
 
@@ -338,70 +337,32 @@ type zapLogger struct {
 	*zap.Logger
 }
 
-func newZapLogger(logger *zap.Logger) Logger {
+func newZapLogger(logger *zap.Logger) Interface {
 	return &zapLogger{logger}
 }
 
-func (l *zapLogger) Info(msg string) {
-	l.Logger.Info(msg)
+func (l *zapLogger) Info(msg string, fileds ...Field) {
+	l.Logger.Info(msg, fileds...)
 }
 
-func (l *zapLogger) InfoWithFields(msg string, fileds map[string]interface{}) {
-	zf := l.toZapFields(fileds)
-	l.Logger.Info(msg, zf...)
+func (l *zapLogger) Debug(msg string, fileds ...Field) {
+	l.Logger.Debug(msg, fileds...)
 }
 
-func (l *zapLogger) Debug(msg string) {
-	l.Logger.Debug(msg)
+func (l *zapLogger) Error(msg string, fileds ...Field) {
+	l.Logger.Error(msg, fileds...)
 }
 
-func (l *zapLogger) DebugWithFields(msg string, fileds map[string]interface{}) {
-	zf := l.toZapFields(fileds)
-	l.Logger.Debug(msg, zf...)
+func (l *zapLogger) Warn(msg string, fileds ...Field) {
+	l.Logger.Warn(msg, fileds...)
 }
 
-func (l *zapLogger) Error(msg string) {
-	l.Logger.Error(msg)
+func (l *zapLogger) Fatal(msg string, fileds ...Field) {
+	l.Logger.Fatal(msg, fileds...)
 }
 
-func (l *zapLogger) ErrorWithFields(msg string, fileds map[string]interface{}) {
-	zf := l.toZapFields(fileds)
-	l.Logger.Error(msg, zf...)
-}
-
-func (l *zapLogger) Warn(msg string) {
-	l.Logger.Warn(msg)
-}
-
-func (l *zapLogger) WarnWithFields(msg string, fileds map[string]interface{}) {
-	zf := l.toZapFields(fileds)
-	l.Logger.Warn(msg, zf...)
-}
-
-func (l *zapLogger) Fatal(msg string) {
-	l.Logger.Fatal(msg)
-}
-
-func (l *zapLogger) FatalWithFields(msg string, fileds map[string]interface{}) {
-	zf := l.toZapFields(fileds)
-	l.Logger.Fatal(msg, zf...)
-}
-
-func (l *zapLogger) Panic(msg string) {
-	l.Logger.Panic(msg)
-}
-
-func (l *zapLogger) PanicWithFields(msg string, fileds map[string]interface{}) {
-	zf := l.toZapFields(fileds)
-	l.Logger.Panic(msg, zf...)
-}
-
-func (l *zapLogger) toZapFields(fileds map[string]interface{}) []zap.Field {
-	fz := []zap.Field{}
-	for k, v := range fileds {
-		fz = append(fz, zap.Any(k, v))
-	}
-	return fz
+func (l *zapLogger) Panic(msg string, fileds ...Field) {
+	l.Logger.Panic(msg, fileds...)
 }
 ```
 
@@ -432,7 +393,7 @@ func CreateTodoHandler(w http.ResponseWriter, r *http.Request) {
     fields := map[string]interface{}{}
 		fields["transactionId"] = txId
     // ส่งไปพร้อมข้อความ
-		logger.Default.Error(appErr.Message, fields)
+		logger.Default.Error(appErr.Message, logger.ToFields(fields)...)
 
 		w.Header().Add("Content-Type", "application/json")
 		w.WriteHeader(appErr.Code)
