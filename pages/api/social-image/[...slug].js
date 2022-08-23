@@ -38,7 +38,6 @@ export default async (req, res) => {
       })
       .join(' | ') || ''
   const content = createContent(dataURI, post.frontMatter.title, formattedDate, tags)
-  console.log(content)
   const page = await browser.newPage()
   page.setViewport({ width: 1128, height: 600 })
   page.setContent(content)
@@ -93,7 +92,6 @@ function createContent(logoURI, title, formattedDate, tags) {
           </div>
         </div>
       </div>
-      ${Buffer.from(title, 'utf-8').toString()}
     </body>
     <style>
       html, body {
