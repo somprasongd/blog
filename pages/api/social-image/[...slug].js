@@ -38,7 +38,8 @@ export default async (req, res) => {
       })
       .join(' | ') || ''
   const content = createContent(dataURI, post.frontMatter.title, formattedDate, tags)
-  console.log(content)
+  console.log(post.frontMatter.title)
+  console.log(Buffer.from(post.frontMatter.title, 'utf-8').toString())
   const page = await browser.newPage()
   page.setViewport({ width: 1128, height: 600 })
   page.setContent(content)
