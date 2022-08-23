@@ -276,4 +276,4 @@ app.Get("/", func(c *fiber.Ctx) error {
 
 การสร้าง logger module ขึ้นมาเองเนื่องจาก เพื่อต้องการเปลี่ยนรูปแบบของ request, response log ให้เป็น JSON Format แล้วยังสามารถใช้สร้าง logger แยกตาม request พร้อมกำหนด fields ต่างๆ ที่ต้องดึงอ่านออกมาจาก request ให่เรียบร้อย ทำให้ไม่ต้องไปดึงค่าใน handler เพื่อลดความผิดพลาด และสะดวกในการแก้ในอนาคตด้วย
 
-ดูโค้ดทั้งหมดได้[ที่นี่](https://github.com/somprasongd/blog-golang/tree/main/goapi-log)
+ดูโค้ดทั้งหมดได้[ที่นี่](https://github.com/somprasongd/blog-code/tree/main/golang/goapi-log)

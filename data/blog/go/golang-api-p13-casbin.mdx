@@ -15,7 +15,7 @@ summary: 'การใช้ Casbin เพื่อทำ Athorization แบบ
 
 ## เพิ่ม Users Resource
 
-[โค้ด](https://github.com/somprasongd/blog-golang/tree/main/goapi-jwt)จากบทความที่แล้ว จะสร้างผู้ใช้งานใหม่ได้โดยการ Register บทความนี้จะเอาโค้ดมาเพิ่ม users resource เพื่อเอาไว้สำหรับให้ admin ทำการเพิ่ม แก้ไข ลบ และแสดงรายชื่อผู้ใช้งานทั้งหมดขึ้นมา
+[โค้ด](https://github.com/somprasongd/blog-code/tree/main/golang/goapi-jwt)จากบทความที่แล้ว จะสร้างผู้ใช้งานใหม่ได้โดยการ Register บทความนี้จะเอาโค้ดมาเพิ่ม users resource เพื่อเอาไว้สำหรับให้ admin ทำการเพิ่ม แก้ไข ลบ และแสดงรายชื่อผู้ใช้งานทั้งหมดขึ้นมา
 
 | Method | URL               | Role  | Description                           |
 | ------ | ----------------- | ----- | ------------------------------------- |
@@ -390,4 +390,4 @@ func (a *app) InitRouter(enforcer *casbin.Enforcer) {
 
 จบแล้วสำหรับการใช้ Casbin เพื่อทำ Athorization แบบ Role-Based Access Control (RBAC)
 
-สามารถดูโค้ดได้[ที่นี่](https://github.com/somprasongd/blog-golang/tree/main/goapi-casbin)
+สามารถดูโค้ดได้[ที่นี่](https://github.com/somprasongd/blog-code/tree/main/golang/goapi-casbin)
