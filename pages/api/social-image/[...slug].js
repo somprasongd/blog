@@ -38,8 +38,7 @@ export default async (req, res) => {
       })
       .join(' | ') || ''
   const content = createContent(dataURI, post.frontMatter.title, formattedDate, tags)
-  console.log(post.frontMatter.title)
-  console.log(Buffer.from(post.frontMatter.title, 'utf-8').toString())
+  console.log(content)
   const page = await browser.newPage()
   page.setViewport({ width: 1128, height: 600 })
   page.setContent(content)
@@ -74,7 +73,8 @@ function getFileBySlug(type, slug) {
 
 function createContent(logoURI, title, formattedDate, tags) {
   return `
-  <html>
+  <!DOCTYPE HTML>
+  <html lang="th">
     <head>
       <meta charset="UTF-8">
     </head>
@@ -93,6 +93,7 @@ function createContent(logoURI, title, formattedDate, tags) {
           </div>
         </div>
       </div>
+      ${Buffer.from(title, 'utf-8').toString()}
     </body>
     <style>
       html, body {
