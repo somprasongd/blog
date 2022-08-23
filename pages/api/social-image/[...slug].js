@@ -37,10 +37,42 @@ export default async (req, res) => {
         return `#${tag}`
       })
       .join(' | ') || ''
-
+  const content = createContent(dataURI, post.frontMatter.title, formattedDate, tags)
+  console.log(content)
   const page = await browser.newPage()
   page.setViewport({ width: 1128, height: 600 })
-  page.setContent(`
+  page.setContent(content)
+  const screenShotBuffer = await page.screenshot()
+  browser.close()
+  res.writeHead(200, {
+    'Content-Type': 'image/png',
+    'Content-Length': Buffer.byteLength(screenShotBuffer),
+  })
+  res.end(screenShotBuffer)
+  //   }
+}
+
+function getFileBySlug(type, slug) {
+  const mdxPath = path.join(basePath, 'data', type, `${slug}.mdx`)
+  const mdPath = path.join(basePath, 'data', type, `${slug}.md`)
+  const source = fs.existsSync(mdxPath)
+    ? fs.readFileSync(mdxPath, 'utf8')
+    : fs.readFileSync(mdPath, 'utf8')
+
+  const { data: frontmatter } = matter(source)
+
+  return {
+    frontMatter: {
+      // slug: slug || null,
+      // fileName: fs.existsSync(mdxPath) ? `${slug}.mdx` : `${slug}.md`,
+      ...frontmatter,
+      date: frontmatter.date ? new Date(frontmatter.date).toISOString() : null,
+    },
+  }
+}
+
+function createContent(logoURI, title, formattedDate, tags) {
+  return `
   <html>
     <head>
       <meta charset="UTF-8">
@@ -48,11 +80,11 @@ export default async (req, res) => {
     <body>
       <div class="social-image-content">
         <h1>
-          ${Buffer.from(post.frontMatter.title, 'utf-8').toString()}
+          ${Buffer.from(title, 'utf-8').toString()}
         </h1>
         <div class="social-image-footer">
           <div class="social-image-footer-left">
-            <img src="${dataURI}" />
+            <img src="${logoURI}" />
             <span>somprasongd.work · ${formattedDate} </span>
           </div>
           <div class="social-image-footer-right">
@@ -138,32 +170,5 @@ export default async (req, res) => {
           font-weight : 600;
       }
     </style>
-  </html>`)
-  const screenShotBuffer = await page.screenshot()
-  browser.close()
-  res.writeHead(200, {
-    'Content-Type': 'image/png',
-    'Content-Length': Buffer.byteLength(screenShotBuffer),
-  })
-  res.end(screenShotBuffer)
-  //   }
-}
-
-function getFileBySlug(type, slug) {
-  const mdxPath = path.join(basePath, 'data', type, `${slug}.mdx`)
-  const mdPath = path.join(basePath, 'data', type, `${slug}.md`)
-  const source = fs.existsSync(mdxPath)
-    ? fs.readFileSync(mdxPath, 'utf8')
-    : fs.readFileSync(mdPath, 'utf8')
-
-  const { data: frontmatter } = matter(source)
-
-  return {
-    frontMatter: {
-      // slug: slug || null,
-      // fileName: fs.existsSync(mdxPath) ? `${slug}.mdx` : `${slug}.md`,
-      ...frontmatter,
-      date: frontmatter.date ? new Date(frontmatter.date).toISOString() : null,
-    },
-  }
+  </html>`
 }
