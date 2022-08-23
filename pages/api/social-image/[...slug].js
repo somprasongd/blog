@@ -48,12 +48,12 @@ export default async (req, res) => {
     <body>
       <div class="social-image-content">
         <h1>
-          ${post.frontMatter.title}
+          ${Buffer.from(post.frontMatter.title, 'utf-8').toString()}
         </h1>
         <div class="social-image-footer">
           <div class="social-image-footer-left">
             <img src="${dataURI}" />
-            <span>somprasong.work · ${formattedDate} </span>
+            <span>somprasongd.work · ${formattedDate} </span>
           </div>
           <div class="social-image-footer-right">
             ${tags}
