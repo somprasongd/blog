@@ -3,18 +3,24 @@ title: จัดลำดับการ start services ใน docker-compose
 date: '2022-08-26'
 tags: ['docker-compose']
 draft: false
-summary: 'ใช้ depends_on มาจัดการลำดับการ start services'
+summary: 'โดยใช้ depends_on มาจัดการลำดับการ start services'
 ---
 
 # จัดลำดับการ start services ใน docker-compose
 
-เวลาเราใช้ docker-compose เป็นตัวจัดการการรัน docker container ถ้ามีหลายๆ services ตัว docker-compose จะทำการ start ทุกๆ services ขึ้นมาพร้อมๆ กันหมดเลย และมีลำดับการ start แบบสุ่ม
+ถ้าเราโปรเจคของเรามีการใช้งาน docker container หลายๆ ตัว วิธีการที่จัดการ container ทั้งหมด เราจะใช้ docker-compose เป็นตัวจัดการ เมื่อเราสั่งรัน ตัว docker-compose จะทำการรันทุกๆ services (containers) ขึ้นมาพร้อมๆ กัน แบบสุ่มลำดับการรันไม่แน่นอนในแต่ละครั้งที่
 
-แล้วถ้าเราอยากกำหนดลำดับการ start services หล่ะ จะทำยังไง ซึ่งใน docker-compose เราจะใช้ `depends_on` เป็นตัวกำหนดลำดับนั่นเอง
+ก็ดูเหมือนจะไม่มีปัญหาอะไร แต่ถ้าเรามี service api ที่จะทำการเชื่อมต่อฐานข้อมูลตอนเริ่มต้นการทำงาน แต่ service ยังไม่เริ่มรันเลย ก็จะทำให้ service api ของเรานั้นรันไม่สำเร็จไปด้วย
 
-## การใช้งาน depends_on
+ในบทความนี้จะใช้ตัวอย่างของการรัน Kong API Gateway ซึ่งจะติดตั้งตามลำดับ ดังนี้
 
-เราสามารถเพิ่ม `depends_on` เข้าไปใน service ที่ต้องการรอ เพื่อบอกว่าต้องรอ services อะไรบ้าง โดยในบทความนี้จะใช้ตัวอย่างการรัน Kong API Gateway ซึ่งจะมีการใช้งาน Database PostgreSQL ซึ่งตัวมันจะมีการเชื่อมต่อไปยัง database ตอนเริ่มต้นการทำงาน ดังนั้น จะต้องตัว Kong จะต้อง start หลังจาก PostgreSQL start แล้ว เราสามารถกำหนดได้แบบนี้
+- ระบบฐานข้อมูล postgres
+- รัน migration เพื่อเตรียมฐานข้อมูลสำหรับ kong
+- kong api gateway
+
+## สร้าง docker-compose.yml
+
+เริ่มจากสร้าง docker-compose.yml โดยอ้างอิงวิธีการติดตั้งตามจาก [docs](https://docs.konghq.com/gateway/latest/install-and-run/docker/) นี้
 
 ```yaml:docker-compose.yml
 version: '3.8'
@@ -41,8 +47,6 @@ services:
       - KONG_PG_USER=kong
       - KONG_PG_PASSWORD=kongpass
     command: 'kong migrations bootstrap'
-    depends_on:
-      - kong-database:
 
   kong-gateway:
     image: kong/kong-gateway:2.8.1.4-alpine
@@ -66,8 +70,6 @@ services:
       - 8445:8445
       - 8003:8003
       - 8004:8004
-    depends_on:
-      - kong-database:
 
   konga:
     image: pantsel/konga
@@ -76,6 +78,56 @@ services:
       - TOKEN_SECRET=konga_token_secret
     ports:
       - 1337:1337
+
+volumes:
+  pg-data:
+```
+
+ทดลองรัน `docker-compose up`
+
+```bash
+docker-compose up
+Creating network "kong_default" with the default driver
+Creating volume "kong_pg-data" with default driver
+Starting kong_konga_1         ... done
+Starting kong_kong-gateway_1  ... done
+Starting kong_kong-migrate_1  ... done
+Starting kong_kong-database_1 ... done
+```
+
+จะเห็นว่า services ทั้งหมดจะ start ขึ้นมาพร้อมๆ กัน แต่ไม่ได้เรียงลำดับตามที่เราต้องการ
+
+## จัดลำดับโดยใช้ depends_on
+
+เราจะใช้ `depends_on` เพิ่มเข้าไปใน service เพื่อบอกให้ service ตัวนั้นหยุดรอ service อื่นๆ ที่เป็น dependencies ทั้งหมดเริ่ม start ให้หมดก่อน แล้วจึงค่อย start ตัวมันเองขึ้นมา
+
+โดยสิ่งที่ต้องการ คือ ต้องให้ kong-database เริ่ม start ก่อน kong-migrate และ kong-gateway
+
+```diff:docker-compose.yml
+version: '3.8'
+services:
+  kong-database:
+    image: postgres:9.6-alpine
+    # ...
+
+  kong-migrate:
+    image: kong/kong-gateway:2.8.1.4-alpine
+    # ...
++   depends_on:
++     - kong-database
+
+  kong-gateway:
+    image: kong/kong-gateway:2.8.1.4-alpine
+    environment:
+      # ...
+    ports:
+      # ...
++   depends_on:
++     - kong-database
+
+  konga:
+    image: pantsel/konga
+    # ...
 
 volumes:
   pg-data:
