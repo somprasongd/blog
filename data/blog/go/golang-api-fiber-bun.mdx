@@ -806,7 +806,9 @@ todo.Get("/:id", func(c *fiber.Ctx) error {
 2. **Bussiness Logic** ในแต่ละ hander จะ logic การทำงานที่แตกต่างกันออกไป
 3. **Data Access** จะส่วนที่ทำหน้าที่ติดต่อกับฐานข้อมูล เพื่อ เรียกดู, บันทึก, แก้ไข หรือลบข้อมูล
 
-   ![Untitled Diagram.drawio.png](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/8ad446d9-edf1-4681-927b-4c0d7ad8feb5/Untitled_Diagram.drawio.png)
+<div className="flex justify-center">
+  <div>![API](/static/images/go/fiber/api.png)</div>
+</div>
 
 ดังนั้นถ้าจะสร้าง TodoHandler จะต้องมี database connection เป็น dependency ด้วย โดยให้สร้างไฟล์ใหม่ `pkg/handlers/todo.go` ขึ้นมา
 
@@ -1203,7 +1205,9 @@ func (h todoHandler) DeleteTodo(c *fiber.Ctx) error {
 
 Data Transfer Objects หรือ DTO นั่นเป็น struct ของโครงสร้างข้อมูลที่ใช้ในการรับส่งข้อมูลกันระหว่าง client กับ server
 
-![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/519dc257-c324-4398-8497-77977b82a6a5/Untitled.png)
+<div className="flex justify-center">
+  <div>![DTO](/static/images/go/fiber/dto.png)</div>
+</div>
 
 ซึ่งเราจะใช้เป็น struct ที่ใช้ในการ bind ค่าจาก request body นั่นเอง แต่จากโค้ดด้านบน struct ที่ใช้ bind request body จะเขียนใส่เอาไว้ใน handlers แต่ละ ซึ่งโค้ดตรงนี้เราสามารถแยกออกมาเป็นอีกไฟล์ได้
 
@@ -1403,7 +1407,9 @@ func (h todoHandler) GetTodo(c *fiber.Ctx) error {
 
 เนื่องจากในโค้ดของ handler เราจะมีการแปลง dto → model และ model → dto กันไปมา ซึ่งทำให้โค้ดเราดูรกไปหน่อย เราจะมาสร้าง mapper เป็นตัวกลางค่อย แปลง dto → model และ model → dto กัน
 
-![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/8d36ed83-9fe3-433a-9fd7-cf1117c9c2c6/Untitled.png)
+<div className="flex justify-center">
+  <div>![Mapper](/static/images/go/fiber/mapper.png)</div>
+</div>
 
 สร้างไฟล์ `pkg/mapper/todo.go`
 
@@ -1465,9 +1471,11 @@ func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
 
 ## Middleware
 
-Middleware คือ function ที่เอามาครอบ handler ของเรา โดยจะทำงานก่อนส่งเข้า handler และหลัง handler ทำงานเสร็จ และสามารถใส่ middleware หลายตัวมาวางซ้อนกันได้ ตัวอย่างการใช้งาน เช่น การทำ logging ของแต่ละ request หรือจัดการ CORS
+Middleware คือ function ที่เอามาครอบ handler ของเรา โดยจะทำงานก่อนส่งเข้า handler และหลัง handler ทำงานเสร็จ และสามารถใส่ middleware หลายตัวมาวางซ้อนกันได้ ตัวอย่างการใช้งาน เช่น การทำ logging ของแต่ละ retquest หรือจัดการ CORS
 
-![Untitled](https://s3-us-west-2.amazonaws.com/secure.notion-static.com/bc1291f7-f32a-4a2a-942c-1ef3063ad368/Untitled.png)
+<div className="flex justify-center">
+  <div>![Middleware](/static/images/go/fiber/mwd.png)</div>
+</div>
 
 ### การใช้งาน Middleware
 
