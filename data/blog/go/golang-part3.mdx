@@ -61,11 +61,11 @@ import "testing"
 
 func TestAdd(t *testing.T){
   // Arrange
-  input1, input2 = 4, 6
+  input1, input2 := 4, 6
   want := 10
 
   // Act
-  got := Add(4, 6)
+  got := Add(input1, input2)
 
   // Assert
   if got != want {
@@ -217,7 +217,7 @@ func ExampleAdd(){
 เพื่อที่จะเอา ExampleAdd ไปแสดงใน godoc ต้องติดตั้ง godoc ก่อน
 
 ```bash
-$ go get golang.org/x/tools/cmd/godoc
+$ go install golang.org/x/tools/cmd/godoc
 ```
 
 แล้วรัน godoc
