@@ -38,9 +38,7 @@ $ go mod init gotest
 
 - ตัวอย่างโปรแกรม
 
-```go
-// math/math.go
-
+```go:math/math.go
 package math
 
 // Add is our function that sums two integers
@@ -56,9 +54,7 @@ func Subtract(x, y int) (res int) {
 
 - เขียน Unit Test
 
-```go
-// math/math_test.go
-
+```go:math/math_test.go
 package math
 
 import "testing"
@@ -115,7 +111,7 @@ PASS
 ok      gotest/math     0.254s
 ```
 
-### การเช็ค **Code coverage**
+### การเช็ค Code coverage
 
 ถ้าต้องการตรวจสอบว่าเราเขียน test ครอบคลุมโค้ดทั้งหมดแล้วหรือไม่ ด้วยการเพิ่ม -cover เข้าไป
 
@@ -162,9 +158,9 @@ $ go tool cover "-html=coverage.out"
 
 ```go
 func BenchmarkAdd(b *testing.B){
-    for i :=0; i < b.N ; i++{
-        Add(4, 6)
-    }
+  for i :=0; i < b.N ; i++{
+    Add(4, 6)
+  }
 }
 ```
 

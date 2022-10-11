@@ -13,7 +13,7 @@ summary: 'Advanced concepts ในภาษา Go ที่คิดว่าน
 
 ## Advanced Functions
 
-### **Variadic Function**
+### Variadic Function
 
 คือ ฟังก์ชันที่รับค่าพารามิเตอร์เป็น `(p ...T)`
 
@@ -42,7 +42,7 @@ func sum(x ...int) int {
 
 </aside>
 
-### **First Class Function**
+### First Class Function
 
 คือ ฟังก์ชันสามารถเป็นตัวแปร หรือเป็น field ใน `struct` ก็ได้
 
@@ -63,116 +63,116 @@ type Math struct {
 }
 ```
 
-### **Higher Order Function**
+### Higher Order Function
 
 มี 2 แบบ คือ
 
 1. **Function as Parameters** คือ ฟังก์ชันใดๆที่รับพารามิเตอร์เป็นฟังก์ชันได้
 
-   ```go
-   package advfunc
+```go
+package advfunc
 
-   import "fmt"
+import "fmt"
 
-   func LearnHOFParam() {
-     // ส่งไป anonymous function ไป
-   	s := hofGreeting(func() string {
-   		return "Ball"
-   	})
+func LearnHOFParam() {
+// ส่งไป anonymous function ไป
+s := hofGreeting(func() string {
+return "Ball"
+})
 
-   	fmt.Println(s)
-   }
+fmt.Println(s)
+}
 
-   // function ที่รับ parameter เป็น anonymous function ที่ return string
-   func hofGreeting(nameFn func() string) string {
-   	return fmt.Sprintf("Hello %s", nameFn())
-   }
-   ```
+// function ที่รับ parameter เป็น anonymous function ที่ return string
+func hofGreeting(nameFn func() string) string {
+return fmt.Sprintf("Hello %s", nameFn())
+}
+```
 
-   หรือจะใช้วิธีสร้างเป็น type ของ function ขึ้นมาแทนก็ได้ แบบนี้
+หรือจะใช้วิธีสร้างเป็น type ของ function ขึ้นมาแทนก็ได้ แบบนี้
 
-   ```go
-   package advfunc
+```go
+package advfunc
 
-   import "fmt"
+import "fmt"
 
-   func LearnHOFParam() {
-     // ส่งไป anonymous function ไป
-   	s := hofGreeting(func() string {
-   		return "Ball"
-   	})
+func LearnHOFParam() {
+  // ส่งไป anonymous function ไป
+	s := hofGreeting(func() string {
+		return "Ball"
+	})
 
-   	fmt.Println(s)
-   }
+	fmt.Println(s)
+}
 
-   // สร้าง type ใหม่ขึ้นมาเป็น function ที่ return string
-   type nameFunc func() string
+// สร้าง type ใหม่ขึ้นมาเป็น function ที่ return string
+type nameFunc func() string
 
-   // เปลี่ยนรับ parameter มาเป็น type ใหม่ที่สร้างมา
-   func hofGreeting(nameFn nameFunc) string {
-   	return fmt.Sprintf("Hello %s", nameFn())
-   }
-   ```
+// เปลี่ยนรับ parameter มาเป็น type ใหม่ที่สร้างมา
+func hofGreeting(nameFn nameFunc) string {
+	return fmt.Sprintf("Hello %s", nameFn())
+}
+```
 
-   สามารถสร้าง function เป็นตัวแปร (First Class Function) แล้วส่งไปก็ได้
+สามารถสร้าง function เป็นตัวแปร (First Class Function) แล้วส่งไปก็ได้
 
-   ```go
-   package advfunc
+```go
+package advfunc
 
-   import "fmt"
+import "fmt"
 
-   func LearnHOFParam() {
-     // สร้างตัวแปรแบบ first class function
-   	nameFn := func() string {
-   		return "Ball"
-   	}
-     // ส่งตัวแปรไปแทน
-   	s := hofGreeting(nameFn)
+func LearnHOFParam() {
+  // สร้างตัวแปรแบบ first class function
+	nameFn := func() string {
+		return "Ball"
+	}
+  // ส่งตัวแปรไปแทน
+	s := hofGreeting(nameFn)
 
-   	fmt.Println(s)
-   }
+	fmt.Println(s)
+}
 
-   // สร้าง type ใหม่ขึ้นมาเป็น function ที่ return string
-   type nameFunc func() string
+// สร้าง type ใหม่ขึ้นมาเป็น function ที่ return string
+type nameFunc func() string
 
-   // เปลี่ยนรับ parameter มาเป็น type ใหม่ที่สร้างมา
-   func hofGreeting(nameFn nameFunc) string {
-   	return fmt.Sprintf("Hello %s", nameFn())
-   }
-   ```
+// เปลี่ยนรับ parameter มาเป็น type ใหม่ที่สร้างมา
+func hofGreeting(nameFn nameFunc) string {
+	return fmt.Sprintf("Hello %s", nameFn())
+}
+```
 
 2. **Function as Return** คือ ฟังก์ชันที่ `return` เป็นฟังก์ชันได้
 
-   ```go
-   package advfunc
+```go
+package advfunc
 
-   import "fmt"
+import "fmt"
 
-   func LearnHOFReturn() {
-   	s := hofGreeting(newNameFunc("Ball"))
+func LearnHOFReturn() {
+	s := hofGreeting(newNameFunc("Ball"))
 
-   	fmt.Println(s)
-   }
+	fmt.Println(s)
+}
 
-   func newNameFunc(name string) nameFunc {
-   	// สร้างตัวแปรแบบ first class function
-   	nameFn := func() string {
-   		return name // เปลี่ยนมาใช้ค่าจากที่ส่งมาแทน
-   	}
+func newNameFunc(name string) nameFunc {
+	// สร้างตัวแปรแบบ first class function
+	nameFn := func() string {
+		return name // เปลี่ยนมาใช้ค่าจากที่ส่งมาแทน
+	}
 
-   	return nameFn
-   }
+	return nameFn
+}
 
-   // สร้าง type ใหม่ขึ้นมาเป็น function ที่ return string
-   type nameFunc func() string
+// สร้าง type ใหม่ขึ้นมาเป็น function ที่ return string
+type nameFunc func() string
 
-   // เปลี่ยนรับ parameter มาเป็น type ใหม่ที่สร้างมา
-   func hofGreeting(nameFn nameFunc) string {
-   	return fmt.Sprintf("Hello %s", nameFn())
-   }
-   ```
+// เปลี่ยนรับ parameter มาเป็น type ใหม่ที่สร้างมา
+func hofGreeting(nameFn nameFunc) string {
+	return fmt.Sprintf("Hello %s", nameFn())
+}
+```
 
-### **Closesure Function**
+### Closesure Function
 
 คือ ฟังก์ชันที่ return ฟังก์ชัน โดยที่ฟังก์ชันที่ return ออกไป ต้องเรียกใช้ตัวแปรจากฟังก์ชันหลักด้วย
 
@@ -205,7 +205,7 @@ func newCounterFunc() func() int {
 
 ## Type Assertions
 
-ในภาษา Go สามารถสร้าง interface เปล่าๆ ขึ้นมารับค่าอะไรก็ได้ แต่การที่จะเอา interface นั้นๆ มาเปรียบเทียบค่ากันตรงๆ กับข้อมูล type อื่นๆ จะทำตรงๆ ไม่ได้ เนื่องจากภาษา Go นั้นเป็น `static type` ต้องใช้วิธีการทำ Assertions ใช้ `.(T)`
+ในภาษา Go สามารถสร้าง interface เปล่าๆ ขึ้นมารับค่าอะไรก็ได้ แต่การที่จะเอา interface นั้นๆ มาเปรียบเทียบค่ากันตรงๆ กับข้อมูล type อื่นๆ จะทำตรงๆ ไม่ได้ เนื่องจากภาษา Go นั้นเป็น `static type` ต้องใช้วิธีการทำ Assertions โดยใช้ `.(T)`
 
 ```go
 var i interface{}
@@ -275,21 +275,23 @@ import "fmt"
 func main() {
 	fmt.Println("counting")
 
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 3; i++ {
 		defer fmt.Println(i)
+    // เท่ากับแบบนี้
+		// defer fmt.Println(0)
+		// defer fmt.Println(1)
+		// defer fmt.Println(2)
 	}
 
 	fmt.Println("done")
 }
 
 // output
-counting
-done
-4
-3
-2
-1
-0
+// counting
+// done
+// 2
+// 1
+// 0
 ```
 
 ## Goroutine
@@ -297,6 +299,39 @@ done
 Goroutine คือ การทำให้โค้ดทำงานแบบ concurrent ในลักษณะของ lightweight thread โดย Go จะไปสร้าง layer ออกมาอีกชั้นหนึ่ง ซึ่งไม่ใช่ thread จริงๆ จึงใช้ memory น้อยกว่า
 
 การใช้งาน Goroutine แค่ใส่ keyword ว่า `go` หน้าฟังก์ชันก็จะได้ goroutine เลย
+
+ตัวอย่าง ถ้าต้องมี function ที่ใช้เวลาทำงานนานๆ แบบนี้
+
+```go:main.go
+package goroutine
+
+import (
+	"fmt"
+	"time"
+)
+
+func LearnGR() {
+	start := time.Now()
+	doLongTask(1)
+	doLongTask(2)
+	doLongTask(3)
+	time.Sleep(120 * time.Millisecond)
+	fmt.Printf("Done in %v\n", time.Since(start))
+}
+
+func doLongTask(taskId int) {
+	time.Sleep(100 * time.Millisecond)
+	fmt.Printf("task id: %d done.\n", taskId)
+}
+
+// Output
+// task id: 1 done.
+// task id: 2 done.
+// task id: 3 done.
+// Done in 425.555828ms
+```
+
+เอา goroutine มาช่วย
 
 ```go
 package goroutine
@@ -306,20 +341,25 @@ import (
 	"time"
 )
 
-func Learn() {
+func LearnGR() {
 	start := time.Now()
 	go doLongTask(1)
 	go doLongTask(2)
 	go doLongTask(3)
 	time.Sleep(120 * time.Millisecond)
-	fmt.Println(time.Since(start))
-
+	fmt.Printf("Done in %v\n", time.Since(start))
 }
 
 func doLongTask(taskId int) {
 	time.Sleep(100 * time.Millisecond)
 	fmt.Printf("task id: %d done.\n", taskId)
 }
+
+// Output
+// task id: 3 done.
+// task id: 2 done.
+// task id: 1 done.
+// Done in 120.666304ms
 ```
 
 ### Waitgroup
@@ -340,17 +380,19 @@ import (
 )
 
 func LearnWG() {
+	start := time.Now()
+
 	wg := &sync.WaitGroup{}
 	// ระบุจำนวน
 	wg.Add(3)
 
-	start := time.Now()
 	go doLongTaskWG(1, wg)
 	go doLongTaskWG(2, wg)
 	go doLongTaskWG(3, wg)
+	// หยุดคอยจนกว่าจะครบตามจำนวนที่ระบุ
 	wg.Wait()
-	fmt.Println(time.Since(start))
 
+	fmt.Printf("Done in %v\n", time.Since(start))
 }
 
 func doLongTaskWG(taskId int, wg *sync.WaitGroup) {
@@ -406,94 +448,97 @@ func read() int {
 
 Channel คือ ช่องทางที่ goroutine เอาไว้คุยกันทั้งการส่ง และรับค่าระหว่าง goroutine ด้วยกัน หรือ goroutine กับ main thread
 
-- Channel มี 2 แบบ
-  - **Unbuffered** เป็น guaranteed synchronization คือ ถ้าฝั่งส่ง ส่งไปแล้วไม่มีใครมารับ ของที่ส่งจะยังคาอยู่ที่ฝั่งส่ง สร้างโดยใช้ `make(chan string)`
-  - **Buffered** สร้างโดยใช้ `make(chan string, 5)` ซึ่ง 5 คือ จำนวน buffered ดังนั้น ฝั่งส่งสามารถส่งข้อมูลไปได้เลย ถึงแม้จะยังไม่มีใครมารับค่า แต่จะส่งมาได้เท่ากับจำนวน buffered ซึ่งถ้าเต็มจะทำให้ส่งมาไม่ได้ ต้องรอจนว่าจะมีใครมารับค่าไปก่อน
-- การรับส่งก็มี 2 แบบ
-  - **2-way Channel** การประกาศแบบปกติจะสามารถอ่าน และเขียนได้
-  - **1-way Channel** ระบุว่าเป็นอ่านอย่างเดียว หรือเขียนอย่างเดียว
-- ตัวอย่างการใช้งาน Channel
+Channel มี 2 แบบ
 
-  ```go
-  package goroutine
+- **Unbuffered** เป็น guaranteed synchronization คือ ถ้าฝั่งส่ง ส่งไปแล้วไม่มีใครมารับ ของที่ส่งจะยังคาอยู่ที่ฝั่งส่ง สร้างโดยใช้ `make(chan string)`
+- **Buffered** สร้างโดยใช้ `make(chan string, 5)` ซึ่ง 5 คือ จำนวน buffered ดังนั้น ฝั่งส่งสามารถส่งข้อมูลไปได้เลย ถึงแม้จะยังไม่มีใครมารับค่า แต่จะส่งมาได้เท่ากับจำนวน buffered ซึ่งถ้าเต็มจะทำให้ส่งมาไม่ได้ ต้องรอจนว่าจะมีใครมารับค่าไปก่อน
 
-  import "fmt"
+การรับส่งก็มี 2 แบบ
 
-  func LearnChan() {
-  	ch := make(chan int)
+- **2-way Channel** การประกาศแบบปกติจะสามารถอ่าน และเขียนได้
+- **1-way Channel** ระบุว่าเป็นอ่านอย่างเดียว หรือเขียนอย่างเดียว
 
-  	go fibo(ch)
+ตัวอย่างการใช้งาน Channel
 
-  	for i := 0; i < 10; i++ {
-  		fmt.Println(<-ch)
-  	}
-  }
+```go
+package goroutine
 
-  func fibo(ch chan int) {
-  	a, b := 0, 1
+import "fmt"
 
-  	for{
-  		ch <- a
-  		a, b = b, a+b
-  	}
-  }
-  ```
+func LearnChan() {
+	ch := make(chan int)
 
-  ### Select Statement
+	go fibo(ch)
 
-  เมื่อมีการสั่งให้รอรับค่าจาก channel จะทำให้โค้ดโดน block ที่จุดนั้นทันที แล้วถ้าเรามีมากกว่า 1 channel แล้วต้องการเลือกว่าจะทำงานต่อเมื่อมีค่าจาก channel ใด channel หนึ่งส่งมา แล้วให้ทำงานเลย จะต้องใช้ select statement มาช่วย
+	for i := 0; i < 10; i++ {
+		fmt.Println(<-ch)
+	}
+}
 
-  ```go
-  package goroutine
+func fibo(ch chan int) {
+	a, b := 0, 1
 
-  import "fmt"
+	for{
+		ch <- a
+		a, b = b, a+b
+	}
+}
+```
 
-  func LearnChanWithSelect() {
-  	ch := make(chan int)
-  	qCh := make(chan struct{})
+### Select Statement
 
-  	go fibo2(ch, qCh)
+เมื่อมีการสั่งให้รอรับค่าจาก channel จะทำให้โค้ดโดน block ที่จุดนั้นทันที แล้วถ้าเรามีมากกว่า 1 channel แล้วต้องการเลือกว่าจะทำงานต่อเมื่อมีค่าจาก channel ใด channel หนึ่งส่งมา แล้วให้ทำงานเลย จะต้องใช้ select statement มาช่วย
 
-  	for i := 0; i < 10; i++ {
-  		fmt.Println(<-ch)
-  	}
-    // ส่งไปบอกว่าให้จบการทำงาน
-  	qCh <- struct{}{}
+```go
+package goroutine
 
-  	// รอรับการตอบกลับ
-  	<-qCh
-  	fmt.Println("Done")
-  }
+import "fmt"
 
-  func fibo2(ch chan int, qCh chan struct{}) {
-  	a, b := 0, 1
+func LearnChanWithSelect() {
+	ch := make(chan int)
+	qCh := make(chan struct{})
 
-  	for{
-  		select{
-  		case ch <- a:
-  		a, b = b, a+b
-  		case <-qCh:
-  			// ตอบกลับว่าได้รับสัญญาณแล้ว
-  			qCh <- struct{}{}
-  			return
-  		}
+	go fibo2(ch, qCh)
 
-  	}
-  }
-  ```
+	for i := 0; i < 10; i++ {
+		fmt.Println(<-ch)
+	}
+  // ส่งไปบอกว่าให้จบการทำงาน
+	qCh <- struct{}{}
 
-  {' '}
+	// รอรับการตอบกลับ
+	<-qCh
+	fmt.Println("Done")
+}
 
-  <aside>
-    💡 ถ้าต้องการ channel ไว้ส่งสัญญาณอย่างเดียว ให้ประกาศโดยใช้ `make(chan struct{})` หรือ
-    `make(chan [0]func)` จะได้ไม่กิน memory
-  </aside>
-  <aside>
-    💡 channel ในภาษา Go ไม่จำเป็นต้อง close เราจะ close เมื่อต้องการส่ง signal เท่านั้น และถ้าไป
-    close ซ้ำ จะเกิด panic ได้
-  </aside>
+func fibo2(ch chan int, qCh chan struct{}) {
+	a, b := 0, 1
 
-## **JSON Marshal**
+	for{
+		select{
+		case ch <- a:
+		a, b = b, a+b
+		case <-qCh:
+			// ตอบกลับว่าได้รับสัญญาณแล้ว
+			qCh <- struct{}{}
+			return
+		}
+
+	}
+}
+```
+
+<aside>
+  💡 ถ้าต้องการ channel ไว้ส่งสัญญาณอย่างเดียว ให้ประกาศโดยใช้ `make(chan struct{})` หรือ `make(chan
+  [0]func)` จะได้ไม่กิน memory
+</aside>
+
+<aside>
+  💡 channel ในภาษา Go ไม่จำเป็นต้อง close เราจะ close เมื่อต้องการส่ง signal เท่านั้น และถ้าไป
+  close ซ้ำ จะเกิด panic ได้
+</aside>
+
+## JSON Marshal
 
 ในภาษา Go นั้นมี standard library ชื่อ [encoding/json](https://golang.org/pkg/encoding/json/) เตรียมไว้ให้แล้วในการแปลงค่าจะ type ต่างๆ ไปเป็น JSON ซึ่งส่วนใหญ่เราจะใช้งานในการทำ API โดยใช้แปลง struct ให้เป็น JSON เพื่อส่งกลับไป
 
