@@ -1,7 +1,7 @@
 ---
 title: 'API Service with Go: API Documents'
 date: '2022-07-20'
-lastmod: '2022-07-21'
+lastmod: '2023-02-21'
 tags: ['api', 'go', 'swagger']
 draft: false
 summary: 'สร้าง Swagger 2.0 Api documents'
@@ -22,13 +22,13 @@ summary: 'สร้าง Swagger 2.0 Api documents'
 1.  เริ่มจากติดตั้ง [Swag](https://github.com/swaggo/swag)
 
     ```bash
-    go get github.com/swaggo/swag/cmd/swag
+    go install github.com/swaggo/swag/cmd/swag@latest
     ```
 
 2.  รัน [Swag](https://github.com/swaggo/swag) เพื่อสร้างไฟล์ที่จำเป็น (`pkg/docs`folder และ `pkg/docs/doc.go`)
 
     ```bash
-    swag init -g pkg/module/module.go -o pkg/docs
+    swag init --parseDependency -g pkg/module/module.go -o pkg/docs
     ```
 
 3.  แก้ไข `pkg/module/module.go` เพื่อใช้ middleware ในการ generate doc ui ขึ้นมา
