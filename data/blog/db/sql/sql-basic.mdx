@@ -21,26 +21,30 @@ summary: 'Database คืออะไร และมีกี่ประเภ
 
   ```bash
   # Install PostgreSQL Version 15
-  $	docker run \
-      --name pg-15 \
-      -p 5432:5432 \
-      --restart always \
-      -e POSTGRES_USER=postgres \
-      -e POSTGRES_PASSWORD=pgpasswd \
-      -v pg-15:/var/lib/postgresql/data \
-      -d postgres:15
+  $ docker run \
+    --name pg-15 \
+    -p 5432:5432 \
+    --restart always \
+    -e POSTGRES_USER=postgres \
+    -e POSTGRES_PASSWORD=pgpasswd \
+    -v pg-15:/var/lib/postgresql/data \
+    -d postgres:15
   ```
 
 - เตรียมฐานข้อมูล
 
   ```bash
   $ docker exec -it pg-15 bash
+
   # ติดตั้ง wget
   root@b3e5dae8d31f:/# apt update && apt install -y wget
+
   # download Chinook_PostgreSql.sql
   root@b3e5dae8d31f:/# wget https://raw.githubusercontent.com/lerocha/chinook-database/master/ChinookDatabase/DataSources/Chinook_PostgreSql.sql
+
   # สร้างฐานข้อมูลใหม่ชื่อ chinook
   root@b3e5dae8d31f:/# createdb -U postgres chinook
+
   # นำเข้าฐานข้อมูลตั้งต้น
   root@b3e5dae8d31f:/# psql -U postgres chinook < Chinook_PostgreSql.sql
   ```
@@ -54,7 +58,7 @@ SQL ย่อมาจาก Structured Query Language แยกแต่ละ�
   สรุปว่า SQL คือ เป็นภาษาที่เอาไว้เขียนคำสั่งไปติดต่อฐานข้อมูลแบบ Relational Database ซึ่งแบ่งเป็นกลุ่มของคำสั่งได้ตามรูปด้านล่างนี้
 
   <div className="flex justify-center">
-    <div>![sql basic](/static/images/db/sql-commands.png)</div>
+    <div>![sql basic](/static/images/db/sql/basic/sql-commands.png)</div>
   </div>
 
   รูปจาก [https://www.geeksforgeeks.org/sql-ddl-dml-tcl-dcl/](https://www.geeksforgeeks.org/sql-ddl-dml-tcl-dcl/)
@@ -62,19 +66,19 @@ SQL ย่อมาจาก Structured Query Language แยกแต่ละ�
   ที่ใช้บ่อยๆ ก็จะเป็นกลุ่ม DDL กับ DML ซึ่งมี Flow การใช้งานตามภาพด้านล่างนี้
 
   <div className="flex justify-center">
-    <div>![sql basic](/static/images/db/flow.png)</div>
+    <div>![sql basic](/static/images/db/sql/basic/flow.png)</div>
   </div>
 
   ตารางก็คือที่จัดเก็บข้อมูลมีโครงสร้างเป็น Column กับ Row
 
   <div className="flex justify-center">
-    <div>![sql basic](/static/images/db/table.png)</div>
+    <div>![sql basic](/static/images/db/sql/basic/table.png)</div>
   </div>
 
   ซึ่งใน 1 ฐานข้อมูลสามารถมีได้หลายตาราง และแต่ละตารางสามารถมี Relational ระหว่างกันได้
 
   <div className="flex justify-center">
-    <div>![sql basic](/static/images/db/relational.png)</div>
+    <div>![sql basic](/static/images/db/sql/basic/relational.png)</div>
   </div>
 
 ## Basic SQL Commands
@@ -93,7 +97,7 @@ SQL ย่อมาจาก Structured Query Language แยกแต่ละ�
   ```
 
   <div className="flex justify-center">
-    <div>![sql basic](/static/images/db/all-col.png)</div>
+    <div>![sql basic](/static/images/db/sql/basic/all-col.png)</div>
   </div>
 
 - ถ้าต้องการแค่บาง Column ทำได้โดยการเปลี่ยนจาก \* ไปเป็น ชื่อ `Column1, Column2, … ColumnN`
@@ -109,7 +113,7 @@ SQL ย่อมาจาก Structured Query Language แยกแต่ละ�
   ```
 
   <div className="flex justify-center">
-    <div>![sql basic](/static/images/db/specific-col.png)</div>
+    <div>![sql basic](/static/images/db/sql/basic/specific-col.png)</div>
   </div>
 
 - ถ้าข้อมูลมีจำนวนเยอะๆ จะทำให้แสดงข้อมูลได้ช้า เราสามารถกำหนดจำนวน Row ที่ต้องการได้
@@ -155,7 +159,7 @@ SQL ย่อมาจาก Structured Query Language แยกแต่ละ�
   ```
 
   <div className="flex justify-center">
-    <div>![sql basic](/static/images/db/merge.png)</div>
+    <div>![sql basic](/static/images/db/sql/basic/merge.png)</div>
   </div>
 
 - เมื่อรันคำสั่งจะเห็นว่าชื่อ Column จะแสดงเป็น ?column? เราสามารถตั้งชื่อให้มันได้โดยใช้ `AS`
@@ -170,7 +174,7 @@ SQL ย่อมาจาก Structured Query Language แยกแต่ละ�
   ```
 
   <div className="flex justify-center">
-    <div>![sql basic](/static/images/db/as.png)</div>
+    <div>![sql basic](/static/images/db/sql/basic/as.png)</div>
   </div>
 
 - บางครั้งข้อมูลที่จะดึงออกมาจะต้องมีการแปลงค่าการนำไปใช้งาน สามารถเขียนเป็น IF-ELSE ได้ด้วยการใช้ `CASE WHEN THEN ELSE END`
@@ -374,7 +378,7 @@ order by "FirstName" desc;
 ใช้สำหรับการเชื่อมตารางที่มีความสัมพันธ์การ ซึ่งมีรูปแบบการ JOINS ทั้งหมด ดังภาพด้านล่าง
 
 <div className="flex justify-center">
-  <div>![sql basic](/static/images/db/joins.png)</div>
+  <div>![sql basic](/static/images/db/sql/basic/joins.png)</div>
 </div>
 
 รูปจาก [https://www.techagilist.com/mainframe/db2/db2-join-inner-joins-and-outer-joins/](https://www.techagilist.com/mainframe/db2/db2-join-inner-joins-and-outer-joins/)
@@ -384,7 +388,7 @@ order by "FirstName" desc;
 - Inner Join คือ เอาข้อมูลที่ทั้ง 2 ตาราง มีเหมือนกัน
 
   <div className="flex justify-center">
-    <div>![sql basic](/static/images/db/inner-join.png)</div>
+    <div>![sql basic](/static/images/db/sql/basic/inner-join.png)</div>
   </div>
 
   ````sql select "Artist"."ArtistId", "Artist"."Name", "Album"."Title" from "Album" inner join "Artist"
@@ -397,7 +401,7 @@ order by "FirstName" desc;
 - [Inclusive] Left Join คือ เอาข้อมูลจากตารางทางซ้ายเป็นหลัก ถ้าทางขวาไม่มีข้อมูลจะมีค่าเป็น NULL
 
   <div className="flex justify-center">
-    <div>![sql basic](/static/images/db/left-join.png)</div>
+    <div>![sql basic](/static/images/db/sql/basic/left-join.png)</div>
   </div>
 
   ````sql select ar."ArtistId", ar."Name", al."Title" from "Album" al left join "Artist" ar ON ar."ArtistId"
@@ -425,7 +429,7 @@ values
 ภาพการเปลี่ยนแปลง
 
 <div className="flex justify-center">
-  <div>![sql basic](/static/images/db/insert.png)</div>
+  <div>![sql basic](/static/images/db/sql/basic/insert.png)</div>
 </div>
 
 ### Update Clause
@@ -449,7 +453,7 @@ where "EmployeeId" = 9;
 ภาพการเปลี่ยนแปลง
 
 <div className="flex justify-center">
-  <div>![sql basic](/static/images/db/update.png)</div>
+  <div>![sql basic](/static/images/db/sql/basic/update.png)</div>
 </div>
 
 **Trick** ที่อยากแนะนำ เมื่อเอา SQL ไปเขียนไว้ในโค้ด และต้องการให้อัพเดทค่าเมื่อ parameter ที่ส่งเข้ามานั้น มีค่า คือต้อง `NOT NULL` โดยการเอา `COALESCE()` มาช่วย
