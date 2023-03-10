@@ -1,0 +1,141 @@
+---
+title: 'Database คืออะไร'
+date: '2023-03-08'
+lastmod: '2023-03-08'
+tags: ['database', 'dbml']
+draft: false
+summary: 'Database คืออะไร และมีกี่ประเภท'
+---
+
+# DBML คืออะไร
+
+**DBML (Database Markup Language)** เป็น DSL ( Domain Specific Language ) ที่ออกแบบมาสำหรับออกแบบโครงสร้างของฐานข้อมูล คล้ายกับคำสั่งสร้างตารางของ SQL แต่เน้นไปที่ให้**อ่านเข้าใจง่ายกว่า**
+
+เช่น ถ้าต้องการแบบโครงตารางของระบบแอฟรายรับ-รายจ่าย
+
+<div className="flex justify-center">
+  <div>![dbml](/static/images/db/dbml.png)</div>
+</div>
+
+จากรูปจะเห็นว่าจะต้องมีตารางข้อมูลผู้ใช้งาน (users) และตารางบันทึกรายรับ-รายจ่าย (transactions) ของผู้ใช้งานแต่ละคน เราสามารถใช้ DBML ออกแบบโครงสร้างตารางได้ ดังนี้
+
+```sql
+// filename: expend-db.dbml
+// เริ่มต้นด้วยการกำหนดรายละเอียดของโปรเจค ExpendApp คือชื่อโปรเจค
+Project ExpendApp {
+  database_type: 'PostgreSQL'
+  note: 'Description of the project'
+}
+
+// วิธีสร้าง Table (belonged to default "public" schema)
+Table users {
+  // [pk] กำหนดให้เป็น primary key
+  id uuid [pk]
+  // [not null, unique] กำหนดให้เป็น not null, unique
+  username varchar [not null, unique]
+  password varchar [not null]
+  // สามารถกำหนดค่าเริ่มต้นได้ โดยใช้ default: xxx
+  created_at timestamp [not null, default: `now()`]
+	// วิธีการใส่ note ให้กับตาราง
+  Note: 'Stores user data'
+}
+
+// belonged to default "public" schema
+Table transactions {
+  id uuid [pk]
+  // กำหนดชนิดข้อมูลเป็น enum
+  type transaction_types [not null]
+  title varchar [not null]
+  amount decimal(10, 2) [not null]
+  created_by uuid [not null]
+  created_at timestamp [not null, default: `now()`]
+
+  Note: 'Stores transaction data'
+}
+
+// วิธีสร้าง enum (belonged to default "public" schema)
+Enum transaction_types {
+  income
+  expend
+}
+
+// วิธีการสร้าง relational (> คือ many-to-one, < คือ one-to-many)
+Ref:users.id < transactions.created_by // one-to-many
+```
+
+## ไฟล์ DBML ทำอะไรได้บ้าง
+
+ตัว DBML นั้นมาพร้อมกับ
+
+- [https://dbdiagram.io](https://dbdiagram.io/) ใช้สำหรับสร้าง ER Diagrams
+- [https://dbdocs.io](https://dbdocs.io/) ใช้สำหรับสร้าง database document
+- Command-line tool สำหรับแปลงกลับไปกลับระหว่าง DBML ↔ SQL
+
+### สร้าง ER Diagrams
+
+สามารถเอา DBML ที่เราเขียนด้านบนไปใส่ในเวบ [https://dbdiagram.io](https://dbdiagram.io/) เพื่อให้สร้าง ER Diagrams ให้เราได้ ตัวอย่างเช่น [https://dbdiagram.io/d/63e9b59b296d97641d805ef6](https://dbdiagram.io/d/63e9b59b296d97641d805ef6)
+
+[https://dbdiagram.io/embed/63e9b59b296d97641d805ef6](https://dbdiagram.io/embed/63e9b59b296d97641d805ef6)
+
+### สร้าง database document
+
+การสร้าง database document จะต้องติดตั้งโปรแกรมเพิ่มเติมก่อน
+
+```bash
+$ npm install -g dbdocs
+```
+
+วิธีการใช้งาน
+
+```bash
+# ให้ทำการ login ก่อนเริ่มการใช้งานในครั้งแรก
+$ dbdocs login
+? Choose a login method: GitHub
+? Please input your authentication token:  YOUR_GITHUB_TOKEN
+✔ Validate token
+✔ Save credential
+
+Done.
+
+# วิธีสร้าง document จากไฟล์ .dbml
+$ dbdocs build expend-db.dbml --project expend-app
+✔ Parsing file content
+⚠ Password is not set for 'expend-app'
+✔ Done. Visit: https://dbdocs.io/somprasongd/expend-app
+
+# ถ้าต้องการกำหนดรหัสผ่าน
+$ dbdocs password --project expend-app --set=1234
+✔ Password is set for 'expend-app'.
+
+# ถ้าต้องการเอารหัสผ่าน
+$ dbdocs password --project expend-app -r
+⚠ Password is removed from 'expend-app'.
+```
+
+เมื่อเสร็จแล้ว สามารถเข้าใช้งานได้จากลิงค์ที่สร้างมาให้ [https://dbdocs.io/somprasongd/expend-app](https://dbdocs.io/somprasongd/expend-app)
+
+### Command-line tool สำหรับแปลงกลับไปกลับระหว่าง DBML ↔ SQL
+
+เริ่มจากติดตั้งโปรแกรม
+
+```bash
+npm install -g @dbml/cli
+```
+
+วิธีแปลงจาก DBML → SQL เพื่อนำไปใช้งานจริง
+
+```bash
+$ dbml2sql --postgres expend-db.dbml -o exported-expend-db.sql
+  ✔ Generated SQL dump file (PostgreSQL): exported-expend-db.sql
+```
+
+หรือถ้าเรามีคำสั่งสร้างตารางที่เป็น SQL เราสามารถแปลงเป็น DBML ได้โดย
+
+```bash
+$ sql2dbml --postgres exported-expend-db.sql -o imported-expend-db.dbml
+  ✔ Generated DBML file from SQL file (PostgreSQL): imported-expend-db.dbml
+```
+
+---
+
+จบแล้วครับกับการแนะนำการใช้งาน DBML จะเห็นว่า DBML นั้นเป็นภาษาที่อ่านได้ง่ายกว่า SQL เยอะ ทำให้เรานำเอา DBML มาใช้ช่วยในการออกแบบร่วมกับทีม Business ได้ จะได้ ER Digrams ออกมาเลย แถมยังช่วยสร้าง Database Document สุดท้ายก็ค่อยแปลงจาก DBML ไปเป็น SQL เพื่อใช้งานตารางจริงๆ ในฐานข้อมูล
