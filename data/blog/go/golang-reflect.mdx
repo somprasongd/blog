@@ -1,0 +1,378 @@
+---
+title: 'เรื่อง Reflect ในภาษา Go'
+date: '2023-04-06'
+tags: ['go']
+draft: false
+summary: 'การอ่านและเขียนข้อมูลด้วย reflect'
+---
+
+# เรื่อง Reflect ในภาษา Go
+
+Reflect เป็นฟีเจอร์ที่มีอยู่ในภาษา Go ที่ช่วยให้เราสามารถเข้าถึงและประมวลผลข้อมูลต่างๆ ได้อย่างยืดหยุ่น โดยไม่จำเป็นต้องระบุชนิดของข้อมูลไว้ล่วงหน้า จึงเหมาะสำหรับการสร้างโปรแกรมที่ต้องการให้มีความยืดหยุ่นมากในการทำงาน เช่น การสร้างไลบรารี (library) ที่สามารถรับพารามิเตอร์ที่ต่างกันได้
+
+อย่างไรก็ตามการใช้งาน reflect ในภาษา Go จะต้องระมัดระวัง เนื่องจากมีผลต่อประสิทธิภาพของโปรแกรม เนื่องจากใช้งาน reflect จะเป็นการเรียกใช้งานฟังก์ชันใน runtime ซึ่งมีความช้ากว่าการเข้าถึงข้อมูลโดยตรง ดังนั้น ในกรณีที่มีความจำเป็นจริงๆ เท่านั้นควรใช้งาน reflect ในโปรแกรมของเราเท่านั้น และควรระมัดระวังการใช้งานให้ถูกต้องตามที่ต้องการ
+
+## เราสามารถใช้ Reflect ทำอะไรได้บ้าง
+
+1. การเข้าถึงและดึงข้อมูลจากแต่ละ Field ของ Struct โดยไม่ต้องระบุชื่อ Field ล่วงหน้า
+
+ตัวอย่างโค้ด:
+
+```go
+package main
+
+import (
+  "fmt"
+  "reflect"
+)
+
+type Person struct {
+  Name string
+  Age  int
+}
+
+func main() {
+  p := Person{
+    Name: "John",
+    Age:  30,
+  }
+
+  // ใช้ reflect.ValueOf เพื่อดึงค่าของ struct
+  v := reflect.ValueOf(p)
+
+  // ใช้ v.NumField() เพื่อวนลูป
+  for i := 0; i < v.NumField(); i++ {
+    // v.Type().Field(i).Name เพื่อดึงชื่อ field
+    fieldName := v.Type().Field(i).Name
+    // ใช้ v.Field(i) เพื่อดึงค่า field
+      field := v.Field(i)
+    // ใช้ field.Interface() เพื่อแปลงเป็น interface{}
+    value := field.Interface()
+    // ใช้ reflect.TypeOf เพื่อดึงชนิดของข้อมูล
+    fieldType := reflect.TypeOf(value)
+    // แสดงผลชื่อสมาชิกและชนิดของข้อมูล
+    fmt.Printf("Field Name: %v, Field Type: %v, Field Value: %v\n", fieldName, fieldType, value)
+  }
+}
+```
+
+ผลลัพธ์:
+
+```bash
+Field Name: Name, Field Type: string, Field Value: John
+Field Name: Age, Field Type: int, Field Value: 30
+```
+
+2. การเรียกใช้งาน Method ของ Struct โดยไม่ต้องระบุชื่อ Method ล่วงหน้า
+
+ตัวอย่างโค้ด:
+
+```go
+type Person struct {
+    Name string
+    Age  int
+}
+
+func (p Person) SayHello() {
+    fmt.Printf("Hello, my name is %s and I'm %d years old\n", p.Name, p.Age)
+}
+
+func main() {
+    p := Person{
+        Name: "John",
+        Age:  30,
+    }
+
+    v := reflect.ValueOf(p)
+  // ใช้ v.MethodByName("MethodName") เพื่อดึง method
+    m := v.MethodByName("SayHello")
+    m.Call(nil)
+}
+```
+
+ผลลัพธ์:
+
+```
+Hello, my name is John and I'm 30 years old
+```
+
+3. การสร้าง Object ของ Struct โดยใช้ข้อมูลที่ระบุในรูปแบบของ `interface{}`
+
+ตัวอย่างโค้ด:
+
+```go
+type Person struct {
+  Name string
+  Age  int
+}
+
+func main() {
+  data := map[string]interface{}{
+    "Name": "John",
+    "Age":  30,
+  }
+
+  p := reflect.New(reflect.TypeOf(Person{})).Elem()
+  for k, v := range data {
+    field := p.FieldByName(k)
+    if field.IsValid() {
+      field.Set(reflect.ValueOf(v))
+    }
+  }
+
+  fmt.Printf("%#v\n", p.Interface())
+}
+```
+
+ผลลัพธ์:
+
+```bash
+main.Person{Name:"John", Age:30}
+```
+
+4. การสร้าง Struct ใหม่ที่ไม่มีชื่อของ Field
+
+ตัวอย่างโค้ด:
+
+```go
+package main
+
+import (
+  "fmt"
+  "reflect"
+)
+
+func NewStruct(params map[string]interface{}) interface{} {
+  // สร้าง slice ของ reflect.Type
+  fields := make([]reflect.StructField, 0)
+  // สร้าง slice ของ reflect.Value
+  values := make([]reflect.Value, 0)
+  // วนลูปผ่านพารามิเตอร์
+  for k, v := range params {
+    // สร้าง reflect.Type และ reflect.Value
+    fieldType := reflect.TypeOf(v)
+    fieldValue := reflect.ValueOf(v)
+    // สร้าง reflect.StructField โดยไม่ระบุชื่อ
+    field := reflect.StructField{
+      Type: fieldType,
+    }
+    // เพิ่ม reflect.StructField และ reflect.Value เข้าไปใน slice
+    fields = append(fields, field)
+    values = append(values, fieldValue)
+  }
+
+  // สร้าง reflect.Type และ reflect.Value ของ struct
+  structType := reflect.StructOf(fields)
+  structValue := reflect.New(structType).Elem()
+
+  // กำหนดค่าให้กับ struct
+  for i, v := range values {
+    structValue.Field(i).Set(v)
+  }
+
+  // คืนค่า struct ที่ถูกสร้างขึ้นใหม่
+  return structValue.Interface()
+}
+
+func main() {
+  // สร้าง struct ใหม่โดยไม่ระบุชื่อ field
+  params := map[string]interface{}{
+    "Name": "John",
+    "Age":  30,
+  }
+  s := NewStruct(params)
+
+  // แสดงผล
+  fmt.Println(s)
+}
+```
+
+ผลลัพธ์:
+
+```
+&{John 30}
+```
+
+5. ใช้ในการร่วมตรวจสอบประเภทข้อมูลของ `interface{}`
+
+ตัวอย่างโค้ด:
+
+```go
+package main
+
+import (
+  "fmt"
+  "reflect"
+)
+
+func printValue(v interface{}) {
+  switch val := v.(type) {
+  case string:
+    fmt.Println("String:", val)
+  case int:
+    fmt.Println("Integer:", val)
+  case bool:
+    fmt.Println("Boolean:", val)
+  default:
+    fmt.Println("Unknown type:", reflect.TypeOf(val))
+  }
+}
+
+func main() {
+  printValue("hello")
+  printValue(42)
+  printValue(true)
+  printValue(3.14)
+}
+```
+
+ตัวอย่างโค้ด แบบที่ 2:
+
+```go
+package main
+
+import (
+  "fmt"
+  "reflect"
+)
+
+func printValue(v interface{}) {
+  val := reflect.ValueOf(v)
+  switch val.Kind() {
+  case reflect.String:
+    fmt.Println("String:", val.String())
+  case reflect.Int:
+    fmt.Println("Integer:", val.Int())
+  case reflect.Bool:
+    fmt.Println("Boolean:", val.Bool())
+  default:
+    fmt.Println("Unknown type:", val.Type())
+  }
+}
+
+func main() {
+  printValue("hello")
+  printValue(42)
+  printValue(true)
+  printValue(3.14)
+}
+```
+
+ผลลัพธ์:
+
+```
+&{John 30}
+```
+
+6. ใช้ reflect ตรวจสอบว่า `interface{}` เป็น nil หรือไม่
+
+โดยใช้ฟังก์ชัน `reflect.ValueOf()` และ `reflect.Value.IsNil()`
+
+- `reflect.ValueOf()` จะรับค่า `interface{}` และส่งคืนค่า reflect.Value ที่เป็นค่าที่แทนค่าของ `interface{}`
+- `reflect.Value.IsNil()` จะตรวจสอบว่าค่าที่อยู่ใน `reflect.Value` เป็น `nil` หรือไม่ โดยจะส่งคืนค่าเป็น `true` หากค่านั้นเป็น `nil` และส่งคืนค่าเป็น `false` หากค่านั้นไม่เป็น `nil`
+
+ตัวอย่างโค้ด:
+
+```go
+package main
+
+import (
+  "fmt"
+  "reflect"
+)
+
+func isNil(i interface{}) bool {
+  // ตรวจสอบว่าพารามิเตอร์ที่รับเข้ามาเป็น pointer หรือไม่
+  if reflect.ValueOf(i).Kind() == reflect.Ptr {
+    // เมื่อเป็น pointer จะเรียกใช้ IsNil() ในการตรวจสอบค่า
+    return reflect.ValueOf(i).IsNil()
+  }
+  // ถ้าไม่ใช่ pointer จะส่งคืนค่า false โดยตรง
+  return false
+}
+
+func main() {
+  var a *int
+  var b interface{} = nil
+  var c interface{} = 10
+
+  fmt.Println("a is nil", isNil(a))
+  fmt.Println("b is nil", isNil(b))
+  fmt.Println("c is nil", isNil(c))
+}
+```
+
+ผลลัพธ์:
+
+```
+a is nil true
+b is nil true
+c is nil false
+```
+
+7. การใช้งาน Reflect ในการทำ Unit Test โดยเน้นไปที่การเรียกใช้ function และการตรวจสอบค่าผลลัพธ์ของ function นั้น
+
+ตัวอย่างฟังก์ชันเพื่อทำการทดสอบ:
+
+```go
+func sum(nums ...int) int {
+  total := 0
+  for _, num := range nums {
+    total += num
+  }
+  return total
+}
+```
+
+เขียนฟังก์ชันทดสอบได้ดังนี้:
+
+```go
+import "reflect"
+
+func TestSum(t *testing.T) {
+  tests := []struct {
+    name string
+    args []int
+    want int
+  }{
+    {
+      name: "Sum of 2 numbers",
+      args: []int{1, 2},
+      want: 3,
+    },
+    {
+      name: "Sum of 3 numbers",
+      args: []int{1, 2, 3},
+      want: 6,
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      // ใช้ reflect.ValueOf เพื่อเข้าถึงค่าของ function sum
+      f := reflect.ValueOf(sum)
+
+      // สร้าง slice ของ reflect.Value จาก args
+      in := make([]reflect.Value, len(tt.args))
+      for k, arg := range tt.args {
+        in[k] = reflect.ValueOf(arg)
+      }
+
+      // เรียกใช้ function ด้วย reflect.Value.Call
+      out := f.Call(in...)
+
+      // แปลงค่าผลลัพธ์จาก reflect.Value เป็น int
+      got := out[0].Interface().(int)
+
+      // ตรวจสอบค่าผลลัพธ์
+      if got != tt.want {
+        t.Errorf("TestSum(%v) got %v, want %v", tt.args, got, tt.want)
+      }
+    })
+  }
+}
+```
+
+## สรุป
+
+ในบทความนี้เราได้ศึกษาเกี่ยวกับการใช้งาน reflect ในภาษา Go ทั้งการอ่านและเขียนข้อมูลด้วย reflect รวมถึงการเรียกใช้ method โดยเราได้เห็นว่าการใช้งาน reflect สามารถช่วยให้โค้ดมีความยืดหยุ่นและสามารถทำงานได้มากขึ้นได้ อย่างไรก็ตามการใช้งาน reflect ก็มีข้อจำกัดบางอย่างเช่นความช้ากว่าการเข้าถึงค่าโดยตรง และการใช้งาน reflect ไม่ใช้รูปแบบของ Type-safe ซึ่งอาจทำให้เกิดข้อผิดพลาดได้ง่ายขึ้น
