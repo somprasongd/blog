@@ -1,0 +1,135 @@
+---
+title: 'ใช้งาน Local Coding Assistant ใน VSCode ด้วย Continue และ Ollama'
+date: '2024-10-08'
+lastmod: '2024-10-08'
+tags: ['llm', 'ollama']
+draft: false
+summary: 'แนะนำการใช้งาน Local Coding Assistant ใน VSCode'
+---
+
+# ใช้งาน Local Coding Assistant ใน VSCode ด้วย Continue และ Ollama
+
+ในยุคที่เทคโนโลยี AI กำลังเข้ามามีบทบาทสำคัญในการพัฒนาซอฟต์แวร์ การมี Coding Assistant ที่ช่วยเหลือนักพัฒนาในการเขียนโค้ดได้อย่างมีประสิทธิภาพกลายเป็นเครื่องมือที่ขาดไม่ได้ แต่หลายคนอาจกังวลเรื่องความปลอดภัยของข้อมูลเมื่อต้องใช้บริการ AI แบบ Cloud-based
+
+บทความนี้จะแนะนำวิธีการสร้าง Local Coding Assistant ใน Visual Studio Code (VSCode) โดยใช้ Continue และ Ollama ซึ่งเป็นเครื่องมือที่ช่วยให้คุณสามารถรัน AI model บนเครื่องของคุณเองได้ วิธีนี้ไม่เพียงแต่ช่วยรักษาความปลอดภัยของข้อมูล แต่ยังช่วยลดค่าใช้จ่ายในการใช้บริการ AI แบบ Cloud อีกด้วย
+
+เราจะพาคุณไปเรียนรู้ตั้งแต่การติดตั้ง Continue และ Ollama ไปจนถึงการตั้งค่าและใช้งาน Local Coding Assistant ใน VSCode อย่างมีประสิทธิภาพ มาเริ่มกันเลย!
+
+## สิ่งที่ต้องเตรียม
+
+- ติดตั้งโปรแกรม [VSCode](https://code.visualstudio.com/download)
+- ติดตั้งโปรแกรม [Ollama](https://somprasongd.work/blog/ai/llm-ollama-oi)
+
+## เริ่มด้วยการติดตั้ง Extension Continue
+
+การใช้งาน Local Coding Assistant ใน VSCode นั่น มี extionsion ให้เลือกใช้งานอยู่หลายตัว ซึ่งในบทความนี้จะเลือกใช้ [Continue](https://marketplace.visualstudio.com/items?itemName=Continue.continue) เนื่องจาก Continue เป็น extension ที่มีความยืดหยุ่นสูง สามารถปรับแต่งให้ทำงานร่วมกับ AI model ต่างๆ ได้ง่าย และมีฟีเจอร์ที่ช่วยในการเขียนโค้ดอย่างครบถ้วน เริ่มต้นด้วยการเปิด VSCode แล้วไปที่ส่วน Extensions จากนั้นค้นหาคำว่า "Continue" และทำการติดตั้ง
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img1.png)</div>
+</div>
+
+## การตั้งค่าการใช้งาน
+
+ตัว Continue สามารถใช้งาน LLM ได้หลาย [providers](https://docs.continue.dev/customize/model-providers) แต่ในบทความเราจะใช้งานแบบ local ผ่าน [Ollama](https://somprasongd.work/blog/ai/llm-ollama-oi) ซึ่งมีขั้นตอนดังนี้
+
+- ตรวจสอบว่าเปิดใช้งาน Ollama แล้ว
+- สำหรับการตั้งค่าสำหรับ Ollama ถ้าดูได้จาก [doc](https://docs.continue.dev/customize/model-providers/ollama) จะเห็นว่ามีการตั้งค่าอยู่ 3 อย่าง คือ
+  - Chat model เป็น model สำหรับการ chat โดยให้เลือก model ที่มี tag ว่า base หรือ instruct แต่แนะนำ instruct เนื่องจากทำมาสำหรับระบบการ chat โดยในบทความนี้จะใช้งาน [qwen2.5-coder](https://ollama.com/library/qwen2.5-coder)
+    ```bash
+    ollama pull qwen2.5-coder:1.5b-instruct
+    ```
+  - Autocomplete Model เป็น model สำหรับการช่วยเติมโค้ดให้เรา โดยให้เลือก model ที่รองรับการทำ fill-in-the-middle code completion โดยดูจาก tag ที่มีคำว่า base หรือ code และควรเลือก model ที่มีขนาดเล็ก จะได้ทำงานได้รวดเร็ว โดยในบทความนี้จะใช้งาน [codegemma](https://ollama.com/library/codegemma)
+    ```bash
+    ollama pull codegemma:2b-code
+    ```
+  - Embeddings model เป็น model สำหรับการ emdeddings ตัวโค้ดในโปรเจคของเรา เพราะให้ LLM รู้จัก codebase ของเรา โดยในบทความนี้จะใช้งาน [nomic-embed-text](https://ollama.com/library/nomic-embed-text)
+    ```bash
+    ollama pull codegemma:2b-code
+    ```
+- การแก้ไขการตั้งค่า ให้เลือกที่ icon ของ Continue และเลือกที่ปุ่ม Configure Continue ตามรูปด้านล่าง
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img2.png)</div>
+</div>
+
+- ระบบจะเปิดไฟล์ Config.json ขึ้นมาให้ โดยให้แก้ไขไฟล์ Config.json ดังนี้
+  ```json
+  {
+    "models": [
+      {
+        "apiBase": "http://localhost:11434/",
+        "title": "qwen2.5-coder 7b instruct",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b-instruct"
+      }
+    ],
+    "tabAutocompleteModel": {
+      "apiBase": "http://localhost:11434/",
+      "title": "Codegemma 2B",
+      "provider": "ollama",
+      "model": "codegemma:2b-code"
+    },
+    "tabAutocompleteOptions": {
+      "disable": false,
+      "debounceDelay": 500,
+      "maxPromptTokens": 1500,
+      "multilineCompletions": "always",
+      "disableInFiles": [
+        "*.md"
+      ]
+    },
+    "embeddingsProvider": {
+      "apiBase": "http://localhost:11434/",
+      "provider": "ollama",
+      "model": "nomic-embed-text"
+    },
+    "customCommands": [...],   // ไม่ต้องแก้ไข
+    "contextProviders": [...], // ไม่ต้องแก้ไข
+    "slashCommands": [...]     // ไม่ต้องแก้ไข
+  }
+  ```
+  หากต้องการให้แสดง model ทั้งหมดใน Ollama สำหรับการ chat ให้ใช้ `"model": "AUTODETECT"`
+  ```json
+  "models": [
+      {
+        "apiBase": "http://localhost:11434/",
+        "title": "Ollama",
+        "provider": "ollama",
+        "model": "AUTODETECT"
+      }
+    ]
+  ```
+
+## ลองใช้งาน Chat Mode
+
+มาลองใช้งาน chat mode กัน โดยตัวอย่างจะลองให้สร้างฟังก์ชันสำหรับสร้าง uuid ในภาษา Go ก็ให้พิมพ์ prompt **“write a function to generate uuid in go without using any external libraries”** ลงไปได้เลย
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img3.png)</div>
+</div>
+
+หากต้องการใช้โค้ดที่สร้างขึ้นมาสามารถ copy ไปได้เลย หรือจะเลือกไฟล์ขึ้น แล้วกด Insert at cursor ก็ได้
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img4.png)</div>
+</div>
+
+## ลองใช้งาน Tab Autocomplete
+
+สำหรับการใช้งาน Autocomplete นั้น เราสามารถทำได้โดยการพิมพ์โค้ดตามปกติ และเมื่อเราหยุดพิมพ์ Continue จะแสดงตัวเลือกการ Autocomplete ให้เราเลือกใช้งานได้ทันที ถ้าต้องการให้กด Tab ซึ่งช่วยให้การเขียนโค้ดเป็นไปอย่างรวดเร็วและมีประสิทธิภาพมากขึ้น
+
+ลองมาดูตัวอย่างการใช้งาน Autocomplete กัน โดยเราจะสร้างฟังก์ชันง่ายๆ ในภาษา Go
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img5.png)</div>
+</div>
+
+## สรุป
+
+- การใช้งาน Local Coding Assistant ใน VSCode ด้วย Continue และ Ollama ช่วยเพิ่มความปลอดภัยของข้อมูลและลดค่าใช้จ่าย
+- ต้องติดตั้ง VSCode, Continue extension และ Ollama
+- ตั้งค่า Continue ให้ใช้งานร่วมกับ Ollama โดยระบุ model สำหรับ chat, autocomplete และ embeddings
+- สามารถใช้งานได้ทั้งในโหมด Chat และ Tab Autocomplete
+- Chat mode ช่วยในการสร้างโค้ดตามคำสั่งที่ระบุ
+- Tab Autocomplete ช่วยเติมโค้ดอัตโนมัติระหว่างการพิมพ์
+- การใช้งานช่วยเพิ่มประสิทธิภาพและความรวดเร็วในการเขียนโค้ด
