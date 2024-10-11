@@ -144,10 +144,11 @@ Continue จะมีการเตรียม [Build-in Context Providers](ht
 
 - `@File` เอาไว้อ้างอิงถึงไฟล์ใน workingspace ที่เปิดอยู่
 - `@Code` เอาไว้อ้างถึง function หรือ class ในโปรเจค ตัวอย่างเช่น ต้องการให้ช่วย review code ของฟังก์ชัน `fibonacci` ให้พิมพ์ `@Code` แล้วเลือกที่ `fibonacci` ตามด้วย prompt `review this code`
-  {' '}
+
   <div className="flex justify-center">
     <div>![](/static/images/ai/local-coding-assistant/img7.png)</div>
   </div>
+
 - `@Docs` สามารถเพิ่ม documentation site ที่ต้องการเข้าไป แล้วถาม LLM ได้ ซึ่งสามารถเพิ่มได้โดยการแก้ไขไฟล์ `config.json` โดยเพิ่มที่ `“docs”: []` ดังนี้
   ```json
   {
@@ -187,12 +188,13 @@ Continue จะมีการเตรียม [Build-in Context Providers](ht
     }
     ```
   - การใช้งานให้พิมพ์ `@Postgres` จะแสดงชื่อตารางมาให้ ให้เลือกตารางที่ต้องการ ตัวอย่าง เลือกตาราง `public.t_patient` กับ `public.t_visit` แล้วใส่ prompt ว่า `เขียน sql เพื่อหาข้อมูล visit ของแต่ละ patient`
-    {' '}
+
     <div className="flex justify-center">
       <div>![](/static/images/ai/local-coding-assistant/img8.png)</div>
     </div>
+
   - สามารถถาม follow-up ต่อได้ เช่น `เปลี่ยนเป็นหาเฉพาะ visit ล่าสุดของแต่ละ patient`
-    {' '}
+
     <div className="flex justify-center">
       <div>![](/static/images/ai/local-coding-assistant/img9.png)</div>
     </div>
@@ -218,6 +220,7 @@ Continue จะมีการเตรียม [Build-in Context Providers](ht
 - สร้างโฟลเดอร์ชื่อ `.prompts/`
 - สร้างไฟล์ชื่อ `check.prompt`
 - แก้ไขไฟล์ตามด้านล่าง และบันทึก
+
   ```
   description: Check for mistakes in my code
   temperature: 0.5
@@ -238,9 +241,11 @@ Continue จะมีการเตรียม [Build-in Context Providers](ht
 
   Once you find an error, please explain it as clearly as possible, but without using extra words. For example, instead of saying 'I think there is a syntax error on line 5', you should say 'Syntax error on line 5'. Give your answer as one bullet point per mistake found. and show a corrected code for each mistake that you found.
   ```
+
   `{{{ input }}}` คือ ข้อความที่เราพิมพ์ลงไปในช่อง Chat
+
 - การเรียกใช้งานให้พิมพ์ `/check` แล้วใส่โค้ดที่ต้องการลงไป
-  {' '}
+
   <div className="flex justify-center">
     <div>![](/static/images/ai/local-coding-assistant/img11.png)</div>
   </div>
