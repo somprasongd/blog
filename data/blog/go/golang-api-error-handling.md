@@ -1,7 +1,7 @@
 ---
 title: 'การจัดการ Error ใน Rest API'
 date: '2025-02-06'
-tags: ['go', 'error']
+tags: ['go', 'api', 'error']
 draft: false
 summary: 'การจัดการ Error ใน Rest API แบบ 3-layer architecture'
 ---
