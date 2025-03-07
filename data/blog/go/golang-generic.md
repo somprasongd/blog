@@ -19,15 +19,28 @@ Generics เป็นความสามารถที่เพิ่มเ�
 ```go
 package main
 
-import "fmt"
+import (
+    "fmt"
+    "time"
+)
 
-func PrintValue(value interface{}) {
-    fmt.Println(value)
+func Sum(values []interface{}) int {
+    var total int
+    for _, v := range values {
+        total += v.(int) // การแปลงประเภททำให้ช้าลง
+    }
+    return total
 }
 
 func main() {
-    PrintValue(42)       // int
-    PrintValue("Hello")  // string
+    values := make([]interface{}, 1000000)
+    for i := 0; i < 1000000; i++ {
+        values[i] = i
+    }
+
+    start := time.Now()
+    fmt.Println("Sum:", Sum(values)) // เกิด panic ได้ถ้าไม่ใช่ int
+    fmt.Println("Duration:", time.Since(start))
 }
 ```
 
