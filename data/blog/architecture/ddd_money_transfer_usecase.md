@@ -2,7 +2,7 @@
 title: 'การออกแบบฟังก์ชัน "โอนเงิน" ในระบบ DDD (Transfer Money Use Case)'
 date: '2025-03-08'
 lastmod: '2025-03-08'
-tags: ['model', 'go', 'architecture'. 'ddd']
+tags: ['model', 'go', 'architecture', 'ddd']
 draft: false
 summary: 'การโอนเงิน (Transfer Money) ในบริบทของ Domain-Driven Design (DDD) เราควรออกแบบอย่างไร'
 ---
