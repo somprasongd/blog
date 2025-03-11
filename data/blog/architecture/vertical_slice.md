@@ -59,7 +59,7 @@ project-root/
 
 ## ตัวอย่างโค้ด: Vertical Slice สำหรับสร้าง Order
 
-**</> main.go (Bootstrap Application) :**
+**#️⃣ main.go (Bootstrap Application) :**
 
 ```go
 package main
@@ -85,7 +85,7 @@ func main() {
 }
 ```
 
-**</> postgres.go (Database Connector) :**
+**#️⃣ postgres.go (Database Connector) :**
 
 ```go
 package db
@@ -110,7 +110,7 @@ func ConnectPostgres() *sql.DB {
 }
 ```
 
-**</> handler.go (HTTP Handler) :**
+**#️⃣ handler.go (HTTP Handler) :**
 
 ```go
 package create
@@ -147,7 +147,7 @@ func RegisterRoute(app *fiber.App, db *sql.DB) {
 }
 ```
 
-**</> service.go (Business Logic) :**
+**#️⃣ service.go (Business Logic) :**
 
 ```go
 package create
@@ -168,7 +168,7 @@ func (s *OrderService) CreateOrder(customerID, productID, amount int) (int64, er
 }
 ```
 
-**</> repository.go (Data Access Layer) :**
+**#️⃣ repository.go (Data Access Layer) :**
 
 ```go
 package create

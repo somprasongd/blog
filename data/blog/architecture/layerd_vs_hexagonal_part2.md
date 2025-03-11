@@ -53,7 +53,7 @@ summary: 'แปลง REST API จาก Layered Architecture ไปเป็�
 └── main.go
 ```
 
-**</> handler.go :**
+**#️⃣ handler.go :**
 
 ```go
 package handler
@@ -81,7 +81,7 @@ func (h *CustomerHandler) GetCustomer(c *fiber.Ctx) error {
 }
 ```
 
-**</> service.go :**
+**#️⃣ service.go :**
 
 ```go
 package service
@@ -104,7 +104,7 @@ func (s *CustomerService) GetCustomer(id string) (*model.Customer, error) {
 }
 ```
 
-**</> repository.go :**
+**#️⃣ repository.go :**
 
 ```go
 package repository
@@ -153,7 +153,7 @@ func (r *CustomerRepository) FindById(id string) (*model.Customer, error) {
 └── main.go
 ```
 
-**</> contract/customer_api/service.go :**
+**#️⃣ contract/customer_api/service.go :**
 
 ```go
 package customer_api
@@ -168,7 +168,7 @@ type CustomerDTO struct {
 }
 ```
 
-**</> module/customer/model.go :**
+**#️⃣ module/customer/model.go :**
 
 ```go
 package customer
@@ -179,7 +179,7 @@ type Customer struct {
 }
 ```
 
-**</> module/customer/repository.go :**
+**#️⃣ module/customer/repository.go :**
 
 ```go
 package customer
@@ -210,7 +210,7 @@ func (r *customerRepository) FindById(id string) (*Customer, error) {
 }
 ```
 
-**</> module/customer/service.go :**
+**#️⃣ module/customer/service.go :**
 
 ```go
 package customer
@@ -234,7 +234,7 @@ func (s *customerService) GetCustomer(id string) (*customer_api.CustomerDTO, err
 }
 ```
 
-**</> module/customer/handler.go :**
+**#️⃣ module/customer/handler.go :**
 
 ```go
 package customer
