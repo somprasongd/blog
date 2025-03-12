@@ -1,11 +1,13 @@
 ---
 title: 'Vertical Slice Architecture'
-date: '2025-03-10'
-lastmod: '2025-03-10'
+date: '2025-03-11'
+lastmod: '2025-03-11'
 tags: ['architecture', 'rest', 'go']
 draft: false
 summary: 'เป็นแนวทางในการออกแบบแอปพลิเคชันที่เน้นการแยกส่วนตาม Feature หรือ Use Case'
 ---
+
+# Vertical Slice Architecture
 
 **Vertical Slice Architecture** เป็นแนวทางในการออกแบบแอปพลิเคชันที่เน้นการแยกส่วนตาม **Feature** หรือ **Use Case** แทนที่จะจัดเรียงโค้ดตาม Layer (เช่น Controller, Service, Repository) แบบดั้งเดิม (Layered Architecture) โดยวิธีนี้ช่วยลดความซับซ้อน (Complexity) และเพิ่มความยืดหยุ่น (Flexibility) ในการขยายระบบ
 
@@ -68,8 +70,8 @@ import (
  "log"
 
  "github.com/gofiber/fiber/v2"
- "your_project/internal/order/create"
- "your_project/pkg/db"
+ "go-app/internal/order/create"
+ "go-app/pkg/db"
 )
 
 func main() {
