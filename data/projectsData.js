@@ -17,9 +17,9 @@ const projectsData = [
   {
     title: 'Early Warning Sign Calculator [NEWS/PEWS]',
     description: `โปรแกรมคำนวน Early Warning Sign [NEWS/PEWS] โดยอ้างอิงจากอายุ
-    Tech stack: Next.js, Golang, PostgreSQL`,
+    Tech stack: Next.js, WASM(Golang)`,
     imgSrc: '/static/projects/newspews.png',
-    href: 'https://newspews.hlabconsulting.com/',
+    href: 'https://somprasongd.github.io/newspews/',
   },
 ]
 
