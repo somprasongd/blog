@@ -145,7 +145,6 @@ async function generateSocialImages(config, allBlogs) {
 
     for (let i = 0; i < publishPosts.length; i++) {
       const post = publishPosts[i]
-      console.log(post)
       await generateFeaturedImage(browser, config, post)
     }
 
