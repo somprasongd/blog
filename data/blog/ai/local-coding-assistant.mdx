@@ -1,0 +1,256 @@
+---
+title: 'ใช้งาน Local Coding Assistant ใน VSCode ด้วย Continue และ Ollama'
+date: '2024-10-10'
+lastmod: '2024-10-10'
+tags: ['llm', 'ollama', 'continue', 'vscode']
+draft: false
+summary: 'แนะนำการใช้งาน Local Coding Assistant ใน VSCode'
+---
+
+# ใช้งาน Local Coding Assistant ใน VSCode ด้วย Continue และ Ollama
+
+ในยุคที่เทคโนโลยี AI กำลังเข้ามามีบทบาทสำคัญในการพัฒนาซอฟต์แวร์ การมี Coding Assistant ที่ช่วยเหลือนักพัฒนาในการเขียนโค้ดได้อย่างมีประสิทธิภาพกลายเป็นเครื่องมือที่ขาดไม่ได้ แต่หลายคนอาจกังวลเรื่องความปลอดภัยของข้อมูลเมื่อต้องใช้บริการ AI แบบ Cloud-based
+
+บทความนี้จะแนะนำวิธีการสร้าง Local Coding Assistant ใน Visual Studio Code (VSCode) โดยใช้ Continue และ Ollama ซึ่งเป็นเครื่องมือที่ช่วยให้คุณสามารถรัน AI model บนเครื่องของคุณเองได้ วิธีนี้ไม่เพียงแต่ช่วยรักษาความปลอดภัยของข้อมูล แต่ยังช่วยลดค่าใช้จ่ายในการใช้บริการ AI แบบ Cloud อีกด้วย
+
+เราจะพาคุณไปเรียนรู้ตั้งแต่การติดตั้ง Continue และ Ollama ไปจนถึงการตั้งค่าและใช้งาน Local Coding Assistant ใน VSCode อย่างมีประสิทธิภาพ มาเริ่มกันเลย!
+
+## สิ่งที่ต้องเตรียม
+
+- ติดตั้งโปรแกรม [VSCode](https://code.visualstudio.com/download)
+- ติดตั้งโปรแกรม [Ollama](https://somprasongd.work/blog/ai/llm-ollama-oi)
+
+## เริ่มด้วยการติดตั้ง Extension Continue
+
+การใช้งาน Local Coding Assistant ใน VSCode นั่น มี extionsion ให้เลือกใช้งานอยู่หลายตัว ซึ่งในบทความนี้จะเลือกใช้ [Continue](https://marketplace.visualstudio.com/items?itemName=Continue.continue) เนื่องจาก Continue เป็น extension ที่มีความยืดหยุ่นสูง สามารถปรับแต่งให้ทำงานร่วมกับ AI model ต่างๆ ได้ง่าย และมีฟีเจอร์ที่ช่วยในการเขียนโค้ดอย่างครบถ้วน เริ่มต้นด้วยการเปิด VSCode แล้วไปที่ส่วน Extensions จากนั้นค้นหาคำว่า "Continue" และทำการติดตั้ง
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img1.png)</div>
+</div>
+
+## การตั้งค่าการใช้งาน
+
+ตัว Continue สามารถใช้งาน LLM ได้หลาย [providers](https://docs.continue.dev/customize/model-providers) แต่ในบทความเราจะใช้งานแบบ local ผ่าน [Ollama](https://somprasongd.work/blog/ai/llm-ollama-oi) ซึ่งมีขั้นตอนดังนี้
+
+- ตรวจสอบว่าเปิดใช้งาน Ollama แล้ว
+- สำหรับการตั้งค่าสำหรับ Ollama ถ้าดูได้จาก [doc](https://docs.continue.dev/customize/model-providers/ollama) จะเห็นว่ามีการตั้งค่าอยู่ 3 อย่าง คือ
+  - Chat model เป็น model สำหรับการ chat โดยให้เลือก model ที่มี tag ว่า base หรือ instruct แต่แนะนำ instruct เนื่องจากทำมาสำหรับระบบการ chat โดยในบทความนี้จะใช้งาน [qwen2.5-coder](https://ollama.com/library/qwen2.5-coder)
+    ```bash
+    ollama pull qwen2.5-coder:1.5b-instruct
+    ```
+  - Autocomplete Model เป็น model สำหรับการช่วยเติมโค้ดให้เรา โดยให้เลือก model ที่รองรับการทำ fill-in-the-middle code completion โดยดูจาก tag ที่มีคำว่า base หรือ code และควรเลือก model ที่มีขนาดเล็ก จะได้ทำงานได้รวดเร็ว โดยในบทความนี้จะใช้งาน [codegemma](https://ollama.com/library/codegemma)
+    ```bash
+    ollama pull codegemma:2b-code
+    ```
+  - Embeddings model เป็น model สำหรับการ emdeddings ตัวโค้ดในโปรเจคของเรา เพราะให้ LLM รู้จัก codebase ของเรา โดยในบทความนี้จะใช้งาน [nomic-embed-text](https://ollama.com/library/nomic-embed-text)
+    ```bash
+    ollama pull codegemma:2b-code
+    ```
+- การแก้ไขการตั้งค่า ให้เลือกที่ icon ของ Continue และเลือกที่ปุ่ม Configure Continue ตามรูปด้านล่าง
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img2.png)</div>
+</div>
+
+- ระบบจะเปิดไฟล์ Config.json ขึ้นมาให้ โดยให้แก้ไขไฟล์ Config.json ดังนี้
+  ```json
+  {
+    "models": [
+      {
+        "apiBase": "http://localhost:11434/",
+        "title": "qwen2.5-coder 7b instruct",
+        "provider": "ollama",
+        "model": "qwen2.5-coder:7b-instruct"
+      }
+    ],
+    "tabAutocompleteModel": {
+      "apiBase": "http://localhost:11434/",
+      "title": "Codegemma 2B",
+      "provider": "ollama",
+      "model": "codegemma:2b-code"
+    },
+    "tabAutocompleteOptions": {
+      "disable": false,
+      "debounceDelay": 500,
+      "maxPromptTokens": 1500,
+      "multilineCompletions": "always",
+      "disableInFiles": [
+        "*.md"
+      ]
+    },
+    "embeddingsProvider": {
+      "apiBase": "http://localhost:11434/",
+      "provider": "ollama",
+      "model": "nomic-embed-text"
+    },
+    "customCommands": [...],   // ไม่ต้องแก้ไข
+    "contextProviders": [...], // ไม่ต้องแก้ไข
+    "slashCommands": [...]     // ไม่ต้องแก้ไข
+  }
+  ```
+  หากต้องการให้แสดง model ทั้งหมดใน Ollama สำหรับการ chat ให้ใช้ `"model": "AUTODETECT"`
+  ```json
+  "models": [
+      {
+        "apiBase": "http://localhost:11434/",
+        "title": "Ollama",
+        "provider": "ollama",
+        "model": "AUTODETECT"
+      }
+    ]
+  ```
+
+## ลองใช้งาน Chat Mode
+
+มาลองใช้งาน chat mode กัน โดยตัวอย่างจะลองให้สร้างฟังก์ชันสำหรับสร้าง uuid ในภาษา Go ก็ให้พิมพ์ prompt **“write a function to generate uuid in go without using any external libraries”** ลงไปได้เลย
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img3.png)</div>
+</div>
+
+หากต้องการใช้โค้ดที่สร้างขึ้นมาสามารถ copy ไปได้เลย หรือจะเลือกไฟล์ขึ้น แล้วกด Insert at cursor ก็ได้
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img4.png)</div>
+</div>
+
+## ลองใช้งาน Tab Autocomplete
+
+สำหรับการใช้งาน Autocomplete นั้น เราสามารถทำได้โดยการพิมพ์โค้ดตามปกติ และเมื่อเราหยุดพิมพ์ Continue จะแสดงตัวเลือกการ Autocomplete ให้เราเลือกใช้งานได้ทันที ถ้าต้องการให้กด Tab ซึ่งช่วยให้การเขียนโค้ดเป็นไปอย่างรวดเร็วและมีประสิทธิภาพมากขึ้น
+
+ลองมาดูตัวอย่างการใช้งาน Autocomplete กัน โดยเราจะสร้างฟังก์ชันง่ายๆ ในภาษา Go
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img5.png)</div>
+</div>
+
+## ความสามารถอื่นๆของ Continue
+
+นอกจากความสามารถในการ Chat และ Autocomplete แล้ว Continue ยังมีฟีเจอร์อื่นๆ ที่น่าสนใจ เช่น การวิเคราะห์โค้ด (Code Analysis) ที่ช่วยตรวจสอบและแนะนำการปรับปรุงโค้ด และการสร้างเอกสารอัตโนมัติ (Auto-documentation) ที่ช่วยสร้างคำอธิบายสำหรับฟังก์ชันหรือคลาสต่างๆ ฟีเจอร์เหล่านี้ช่วยให้นักพัฒนาสามารถทำงานได้อย่างมีประสิทธิภาพมากขึ้น เรามาดูกันว่าจะใช้งานความสามารถเหล่านั้นยังไง
+
+### Right-Click → Continue
+
+เราสามารถเลือกไฮไลท์โค้ดที่ต้องการ แล้วคลิกขวา เลือก Continue เพื่อช่วยแก้ไขโค้ด หรือเขียนคอมเมนต์ได้
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img6.png)</div>
+</div>
+
+### Build-in Context Providers
+
+Continue จะมีการเตรียม [Build-in Context Providers](https://docs.continue.dev/customize/context-providers#built-in-context-providers) เอาไว้เพื่อรับข้อมูลป้อนเข้าสู่ LLM
+
+วิธีการใช้คือ ให้พิมพ์ `@` ในระบบ Chat จะแสดงเป็นเมนูแบบ dropdown ขึ้นมาให้เราเลือก โดยมี Build-in Context Providers ที่หน้าสนใจดังนี้
+
+- `@File` เอาไว้อ้างอิงถึงไฟล์ใน workingspace ที่เปิดอยู่
+- `@Code` เอาไว้อ้างถึง function หรือ class ในโปรเจค ตัวอย่างเช่น ต้องการให้ช่วย review code ของฟังก์ชัน `fibonacci` ให้พิมพ์ `@Code` แล้วเลือกที่ `fibonacci` ตามด้วย prompt `review this code`
+
+  <div className="flex justify-center">
+    <div>![](/static/images/ai/local-coding-assistant/img7.png)</div>
+  </div>
+
+- `@Docs` สามารถเพิ่ม documentation site ที่ต้องการเข้าไป แล้วถาม LLM ได้ ซึ่งสามารถเพิ่มได้โดยการแก้ไขไฟล์ `config.json` โดยเพิ่มที่ `“docs”: []` ดังนี้
+  ```json
+  {
+    "docs": [
+      {
+        "title": "Fiber",
+        "startUrl": "https://docs.gofiber.io/",
+        "rootUrl": "https://docs.gofiber.io/",
+        "faviconUrl": "https://docs.gofiber.io/img/favicon.png"
+      },
+      {
+        "title": "SQLX",
+        "startUrl": "https://jmoiron.github.io/sqlx/",
+        "rootUrl": "https://jmoiron.github.io/sqlx/"
+      }
+    ]
+  }
+  ```
+- `@Postgres` สามารถเชื่อมต่อ Postgresql เพื่อดึงข้อมูลตาราง และตัวอย่างข้อมูลมาใช้งานได้
+
+  - วิธีการตั้งค่า แก้ไขไฟล์ `config.json` โดยเพิ่มที่ `“contextProviders”: []` ดังนี้
+    ```json
+    {
+      "contextProviders": [
+        {
+          "name": "postgres",
+          "params": {
+            "host": "localhost",
+            "port": 5432,
+            "user": "postgres",
+            "password": "secretpasswd",
+            "database": "hosv3",
+            "schema": "public",
+            "sampleRows": 5
+          }
+        }
+      ]
+    }
+    ```
+  - การใช้งานให้พิมพ์ `@Postgres` จะแสดงชื่อตารางมาให้ ให้เลือกตารางที่ต้องการ ตัวอย่าง เลือกตาราง `public.t_patient` กับ `public.t_visit` แล้วใส่ prompt ว่า `เขียน sql เพื่อหาข้อมูล visit ของแต่ละ patient`
+
+    <div className="flex justify-center">
+      <div>![](/static/images/ai/local-coding-assistant/img8.png)</div>
+    </div>
+
+  - สามารถถาม follow-up ต่อได้ เช่น `เปลี่ยนเป็นหาเฉพาะ visit ล่าสุดของแต่ละ patient`
+
+    <div className="flex justify-center">
+      <div>![](/static/images/ai/local-coding-assistant/img9.png)</div>
+    </div>
+
+### **Built-in Slash Commands**
+
+เพื่อให้งาน prompt ที่ continue เตรียมไว้ให้ โดยการพิมพ์ `/` จะมีเมนูแบบ dropdown มาให้เลือก
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/local-coding-assistant/img10.png)</div>
+</div>
+
+- `/comment` ใช้สำหรับช่วยเขียน comment
+- `/commit` ใช้สำหรับช่วยเขียน commit message โดยดูจากไฟล์ที่แก้ไขไแ
+- `/test` ใช้สำหรับช่วยเขียน unit test
+
+### Prompt fiels
+
+เราสามารถสร้าง prompt เอาไว้ใช้งานผ่าน [slash commands](https://docs.continue.dev/customize/slash-commands) ได้ด้วยการสร้าง [prompt file](https://docs.continue.dev/customize/deep-dives/prompt-files) เอาไว้ที่ `.prompts/`
+
+ตัวอย่าง การสร้าง prompt สำหรับการตรวจสอบหาข้อผิดพลาดของโค้ด
+
+- สร้างโฟลเดอร์ชื่อ `.prompts/`
+- สร้างไฟล์ชื่อ `check.prompt`
+- แก้ไขไฟล์ตามด้านล่าง และบันทึก
+
+  ```
+  description: Check for mistakes in my code
+  temperature: 0.5
+  maxTokens: 4096
+  ---
+  <system>
+  You are an expert programmer
+  </system>
+
+  {{{ input }}}
+
+  Please read the highlighted code and check for any mistakes. You should look for the following, and be extremely vigilant:
+  - Syntax errors
+  - Logic errors
+  - Security vulnerabilities
+  - Performance issues
+  - Anything else that looks wrong
+
+  Once you find an error, please explain it as clearly as possible, but without using extra words. For example, instead of saying 'I think there is a syntax error on line 5', you should say 'Syntax error on line 5'. Give your answer as one bullet point per mistake found. and show a corrected code for each mistake that you found.
+  ```
+
+  `{{{ input }}}` คือ ข้อความที่เราพิมพ์ลงไปในช่อง Chat
+
+- การเรียกใช้งานให้พิมพ์ `/check` แล้วใส่โค้ดที่ต้องการลงไป
+
+  <div className="flex justify-center">
+    <div>![](/static/images/ai/local-coding-assistant/img11.png)</div>
+  </div>
+
+## สรุป
+
+การใช้งาน Local Coding Assistant ใน VSCode ด้วย Continue และ Ollama เป็นวิธีที่มีประสิทธิภาพในการเพิ่มประสิทธิภาพการเขียนโค้ด โดยไม่ต้องกังวลเรื่องความปลอดภัยของข้อมูลและค่าใช้จ่ายจากบริการ Cloud-based LLM

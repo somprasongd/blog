@@ -1,0 +1,173 @@
+---
+title: 'การตั้งชื่อในภาษา Go'
+date: '2023-06-22'
+lastmod: '2023-06-22'
+tags: ['go']
+draft: false
+summary: 'บทความนี้จะแนะนำวิธีการตั้งชื่อในภาษา Go กัน'
+---
+
+# Golang Naming Conventions
+
+บทความนี้จะแนะนำวิธีการตั้งชื่อในภาษา Go กัน ซึ่งจะแบ่งออกเป็น 3 ระดับ
+
+```
+— Package Names
+— — Files Names
+— — — Function
+— — — Type
+— — — Variable
+— — — Constant
+```
+
+## Package Name Convention
+
+1. ตัวพิมพ์เล็กเท่านั้น และควรเป็นคำคำเดียว ห้ามใช้ underscore (`_`) หรือตั้งชื่อแบบ camelCase
+
+   ตัวอย่าง
+
+   ```go
+   github.com/username/project
+   ```
+
+   ซึ่งจะดีกว่าการตั้งแบบด้านล่างนี้
+
+   ```go
+   github.com/username/PROJECT
+   or
+   github.com/username/Project
+   ```
+
+2. ในกรณีที่ชื่อยาว ให้ใช้ชื่อย่อ หรือคั่นด้วย dash (`-`) แทน
+
+   ตัวอย่าง
+
+   ```go
+   github.com/username/postgresusers
+   or
+   github.com/username/pgusers
+   or
+   github.com/username/postgres-users
+   ```
+
+   การใช้ชื่อย่อจาก Golang official named packages
+
+   ```go
+   package strconv      ดีกว่า    package string-conversion
+   package os           ดีกว่า    package operatingSystem
+   package doc          ดีกว่า    package documentation
+   package syslog       ดีกว่า    package system-log
+   package ioutil       ดีกว่า    package io_utility
+   ```
+
+3. หลีกเลี่ยงไม่ตั้งชื่อชนกับ standard library package names
+
+## File Name Convention
+
+1. ใช้ตัวพิมพ์เล็กทั้งหมด ไม่ตั้งชื่อแบบ camelCase
+2. ควรใช้ชื่อสั้นๆ แต่สามารถสื่อความหมายถึงโค้ดด้านใน หรือจุดประสงค์ของไฟล์นั้นๆ
+3. ถ้ามีหลายคำให้คั่นแต่และคำด้วย underscore (`_`)
+
+   ตัวอย่าง
+
+   ```go
+   config.go
+   database.go
+   db_config.go
+   user_service.go
+   user_service_notification.go
+   service.go
+   ```
+
+   ซึ่งจะดีกว่าการตั้งแบบด้านล่างนี้
+
+   ```go
+   userController.go
+   dbConfig.go
+   userService.go
+   ```
+
+4. สำหรับไฟล์ test ให้ลงท้ายด้วย `_test.go` เสมอ
+
+## Function Name Convention
+
+1. ตั้งชื่อด้วย camelCase
+2. เมื่อต้องการ export ให้ตั้งขึ้นด้วยตัวพิมพ์ใหญ่ (PascalCase)
+
+   ตัวอย่าง
+
+   ```go
+   writeToFile() // unexported, only visible within the package
+
+   WriteToFile() // exported, visible within and outside the package
+   ```
+
+3. หลีกเลี่ยงการตั้งชื่อซ้ำกับ package name
+
+   ตัวอย่าง
+
+   ```go
+   package log
+
+   log.Info()    // good
+
+   log.LogInfo() // bad, because it repeats the package name.
+   ```
+
+## Type Name Convention
+
+type name จะรวมทั้ง stuct, interface, type aliases
+
+1. ตั้งชื่อด้วย PascalCase
+2. ถ้าไม่ต้องการ export ให้ตั้งขึ้นต้นด้วยตัวพิมพ์เล็ก (camelCase)
+3. ชื่อ element ให้ใช้วิธีเดียวกัน
+
+ตัวอย่าง
+
+```go
+type user struct {
+  ID uint64            // exported element
+  CreatedAt time.Time  // exported element
+  deletedAt time.Time  // unexported element
+}
+```
+
+## Variables and Constants Names Convention
+
+1. ใช้ camel case เมื่อต้องการ export ให้ขึ้นตัวด้วยตัวพิมพ์ใหญ่
+2. กรณีชื่อย่อ ให้ชนิดตัวพิมพ์เดียวกันทั้งคำย่อ ตัวอย่างคำว่า `URL` จะตั้งเป็น `URL` หรือ `url`
+
+   ตัวอย่าง
+
+   ```go
+   URL --> urlService or URLService
+   HTTP --> ServeHTTP not ServerHttp
+   ```
+
+3. ถ้าตัวแปลนั้นมีการใช้งานใน package private scope ให้ตั้งชื่อเต็ม ห้ามย่อ เช่น `patientRepository`
+4. ถ้าตัวแปลนั้นมีการใช้งานภายใน function scope ให้ตั้งเป็นชื่อย่อได้ 2-4 ตัวอักษร เช่น `patient` → `pt` แต่ต้องระวังไม่ใช้ชนกับชื่อของ package, ตัวแปลใน upper scope และ receiver type
+
+## Reveiver Name Convention
+
+1. ให้ตั้งสั้นๆ แค่ 1 ตัว หรือใช้ตัวย่อของ type name
+2. ไม่ใช้ `this` หรือ `self`
+
+## Comments
+
+ให้เว้นช่องว่างหลัง `//`
+
+ตัวอย่าง
+
+```go
+writeToFile() // unexported, only visible within the package
+
+WriteToFile() // exported, visible within and outside the package
+```
+
+ซึ่งจะดีกว่าการตั้งแบบด้านล่างนี้
+
+```go
+writeToFile() //unexported, only visible within the package
+
+WriteToFile() //exported, visible within and outside the package
+```

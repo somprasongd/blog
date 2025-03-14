@@ -1,0 +1,333 @@
+---
+title: 'API Service with Go: Database Migrations'
+date: '2022-07-21'
+lastmod: '2022-07-21'
+tags: ['migration', 'go']
+draft: false
+summary: 'ทำ Database Migration โดยใช้ goose'
+---
+
+# Database Migrations
+
+ในการสร้าง API Service ใน บทความที่ผ่านๆ มาจะมีการทำ database migration ผ่าน [gorm](https://gorm.io/)
+
+```go
+func Migrate(db *gorm.DB) error {
+	return db.AutoMigrate(&model.Todo{})
+}
+```
+
+ซึ่งมันจะทำงานทุกครั้งที่เริ่มต้นโปรแกรม ถ้าเราเอาไป deploy บน kubernates ที่มีหลาย replica มันจะทำการ start pod ขึ้นมาพร้อมๆ กัน แล้วมันก็จะทำการ migration พร้อมๆ กันด้วย ซึ่งไม่ดีแน่
+
+ดังนั้น เราจึงควรแยกการทำ migration ออกมา และสั่งให้มันทำงานก่อนเริ่มรัน API Service ของเรา
+
+ในภาษา Go มีเครื่องมือให้ใช้หลายตัว เช่น
+
+- [migrate](https://github.com/golang-migrate/migrate)
+- [goose](https://github.com/pressly/goose) ในบทความจะใช้ตัวนี้
+
+## การใช้งาน goose
+
+การใช้งาน goose สามารถทำได้ 2 วิธี
+
+## 1. ใช้ **CLI**
+
+การใช้งานผ่าน cli จำเป็นต้องติดตั้ง \*\*\*\*`go install [github.com/pressly/goose/v3/cmd/goose@latest](http://github.com/pressly/goose/v3/cmd/goose@latest)` ก่อน
+
+- สร้างไฟล์ migration โดยใช้คำสั่ง
+  ```bash
+  $ goose create create_todo sql
+  Created new file: 20220721163524_create_todo.sql
+  ```
+- จะได้ไฟล์ 20220721163524_create_todo.sql ออกมา
+
+  ```sql
+  -- +goose Up
+  -- +goose StatementBegin
+  SELECT 'up SQL query';
+  -- +goose StatementEnd
+
+  -- +goose Down
+  -- +goose StatementBegin
+  SELECT 'down SQL query';
+  -- +goose StatementEnd
+  ```
+
+- โดยจะมี 2 ส่วน คือ goose Up เอาไว้ใส่คำสั่ง migration version นี้ ส่วน goose Down เอาไว้สั่งให้ถอยกลับ version
+
+  ```sql
+  -- +goose Up
+  -- +goose StatementBegin
+  CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+  CREATE TYPE todo_status AS ENUM ('open', 'done');
+
+  CREATE TABLE public.todos (
+  	id uuid NOT NULL DEFAULT uuid_generate_v4(),
+  	"text" text NOT NULL,
+  	status text NULL DEFAULT 'open'::text,
+  	created_at timestamptz NULL,
+  	updated_at timestamptz NULL,
+  	CONSTRAINT todos_pkey PRIMARY KEY (id)
+  );
+  -- +goose StatementEnd
+
+  -- +goose Down
+  -- +goose StatementBegin
+  DROP TABLE todos;
+  DROP TYPE todo_status;
+  -- +goose StatementEnd
+  ```
+
+- สั่งให้รัน migrate โดยใช้คำสั่ง
+  ```bash
+  $ goose postgres "postgresql://postgres:S3cretp@ssw0rd@localhost:5433/todos?sslmode=disable" up
+  2022/07/21 16:50:19 OK    20220721163524_create_todo.sql
+  2022/07/21 16:50:19 goose: no migrations to run. current version: 20220721163524
+  ```
+- การตรวจสอบสถานะ โดยใช้คำสั่ง
+  ```bash
+  $ goose postgres "postgresql://postgres:S3cretp@ssw0rd@localhost:5433/todos?sslmode=disable" status
+  2022/07/21 16:51:56     Applied At                  Migration
+  2022/07/21 16:51:56     =======================================
+  2022/07/21 16:51:56     Thu Jul 21 16:46:13 2022 -- 20220721163524_create_todo.sql
+  ```
+- การสั่งให้ถอยกลับ version
+  ```bash
+  $ goose postgres "postgresql://postgres:S3cretp@ssw0rd@localhost:5433/todos?sslmode=disable" down
+  2022/07/21 16:52:16 OK    20220721163524_create_todo.sql
+  ```
+
+## 2. การใช้งานผ่านโค้ด
+
+เราสามารถเขียนโค้ดสั่งให้ up หรือ down ได้ แต่โค้ดจะใช้ connection จาก sql.DB ไม่ใช้ gorm.DB ดังนั้นจะเริ่มจากการสร้าง sql.DB ขึ้นมา
+
+- สร้างไฟล์ `pkg/app/database/db.go`
+
+  ```go
+  package database
+
+  import (
+  	"database/sql"
+  	"fmt"
+  	"goapi/pkg/config"
+
+  	_ "github.com/lib/pq"
+  )
+
+  type SqlDB struct {
+  	*sql.DB
+  }
+
+  func NewDB(conf *config.Config) (*SqlDB, error) {
+  	// Build a DSN e.g. postgres://username:password@host:port/dbName
+  	dsn := fmt.Sprintf("postgres://%v:%v@%v:%v/%v?sslmode=%v",
+  		conf.Db.Username,
+  		conf.Db.Password,
+  		conf.Db.Host,
+  		conf.Db.Port,
+  		conf.Db.Database,
+  		conf.Db.Sslmode)
+
+  	db, err := sql.Open("postgres", dsn)
+
+  	if err != nil {
+  		return nil, err
+  	}
+
+  	return &SqlDB{db}, nil
+  }
+
+  func (db *SqlDB) CloseDB() error {
+  	return db.Close()
+  }
+  ```
+
+- สร้างไฟล์ main ใหม่ เพื่อใช้รันโปรแกรม migrate `cmd/migrate/main.go`
+
+  ```go
+  package main
+
+  import (
+  	"flag"
+  	"fmt"
+  	"goapi/pkg/app/database"
+  	"goapi/pkg/common/logger"
+  	"goapi/pkg/config"
+  	"os"
+
+  	"github.com/pressly/goose/v3"
+  )
+
+  const dialect = "postgres"
+
+  var (
+  	flags = flag.NewFlagSet("migrate", flag.ExitOnError)
+  	dir   = flags.String("dir", "./migrations", "directory with migration files")
+  )
+
+  func main() {
+  	flags.Usage = usage
+  	flags.Parse(os.Args[1:])
+
+  	args := flags.Args()
+  	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" {
+  		flags.Usage()
+  		return
+  	}
+
+  	command := args[0]
+
+  	switch command {
+  	case "create":
+  		if err := goose.Run("create", nil, *dir, args[1:]...); err != nil {
+  			logger.Error(fmt.Sprintf("migrate run: %v", err))
+  			panic(err)
+  		}
+  		return
+  	case "fix":
+  		if err := goose.Run("fix", nil, *dir); err != nil {
+  			logger.Error(fmt.Sprintf("migrate run: %v", err))
+  			panic(err)
+  		}
+  		return
+  	}
+
+  	appConf := config.LoadConfig()
+  	logger.Info("Start migration...")
+
+  	// initialize data sources
+  	sqlDB, err := database.NewDB(appConf)
+
+  	if err != nil {
+  		logger.Error(err.Error())
+  		panic(err)
+  	}
+
+  	defer sqlDB.CloseDB()
+
+  	if err := goose.SetDialect(dialect); err != nil {
+  		logger.Error(err.Error())
+  		panic(err)
+  	}
+
+  	if err := goose.Run(command, sqlDB.DB, *dir, args[1:]...); err != nil {
+  		logger.Error(fmt.Sprintf("migrate run: %v", err))
+  		panic(err)
+  	}
+  }
+
+  func usage() {
+  	fmt.Println(usagePrefix)
+  	flags.PrintDefaults()
+  	fmt.Println(usageCommands)
+  }
+
+  var (
+  	usagePrefix = `Usage: migrate [OPTIONS] COMMAND
+  Examples:
+      migrate status
+  Options:
+  `
+
+  	usageCommands = `
+  Commands:
+      up                   Migrate the DB to the most recent version available
+      up-by-one            Migrate the DB up by 1
+      up-to VERSION        Migrate the DB to a specific VERSION
+      down                 Roll back the version by 1
+      down-to VERSION      Roll back to a specific VERSION
+      redo                 Re-run the latest migration
+      reset                Roll back all migrations
+      status               Dump the migration status for the current DB
+      version              Print the current version of the database
+      create NAME [sql|go] Creates new migration file with the current timestamp
+      fix                  Apply sequential ordering to migrations
+  `
+  )
+  ```
+
+- สร้างไฟล์ migration โดยใช้คำสั่ง
+  ```bash
+  $ go run cmd/migrate/main.go create create_todo sql
+  Created new file: 20220721163524_create_todo.sql
+  ```
+- สั่งให้รัน migrate โดยใช้คำสั่ง
+  ```bash
+  $ go run cmd/migrate/main.go up
+  2022-07-21T17:04:34.563+0700    INFO    map[file.line:49 file.name:migrate/main.go]     Start migration...      {"ecs.version": "1.6.0"}
+  2022/07/21 17:04:34 OK    20220721163524_create_todo.sql
+  2022/07/21 17:04:34 goose: no migrations to run. current version: 20220721163524
+  ```
+- การตรวจสอบสถานะ โดยใช้คำสั่ง
+  ```bash
+  $ go run cmd/migrate/main.go status
+  2022-07-21T17:04:41.791+0700    INFO    map[file.line:49 file.name:migrate/main.go]     Start migration...      {"ecs.version": "1.6.0"}
+  2022/07/21 17:04:41     Applied At                  Migration
+  2022/07/21 17:04:41     =======================================
+  2022/07/21 17:04:41     Thu Jul 21 17:04:34 2022 -- 20220721163524_create_todo.sql
+  ```
+- การสั่งให้ถอยกลับ version
+  ```bash
+  $ migrate-down
+  2022-07-21T17:04:48.622+0700    INFO    map[file.line:49 file.name:migrate/main.go]     Start migration...      {"ecs.version": "1.6.0"}
+  2022/07/21 17:04:48 OK    20220721163524_create_todo.sql
+  ```
+
+### เมื่อสร้างเป็น Dockerfile
+
+เราต้องเพิ่มการ build `cmd/migrate/main.go` เข้าด้วย แล้วก็ copy ไฟล์ที่ build ออกมา พร้อมทั้งไฟล์ migrate ทั้งหมดด้วย
+
+```docker
+FROM golang:1.18-alpine AS build
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY pkg ./pkg
+ENV GOARCH=amd64
+RUN go build -o /go/bin/api cmd/api/main.go \
+    # build migrate เพิ่มเข้ามา
+    && go build -o /go/bin/migrate cmd/migrate/main.go
+
+FROM alpine:latest
+RUN apk --no-cache add ca-certificates tzdata
+WORKDIR /app
+EXPOSE 8080
+
+ENV TZ=Asia/Bangkok
+ENV APP_MODE=production
+# copy all migration files
+COPY migrations /app/migrations
+COPY --from=build /go/bin/api /app/api
+# copy app migrate
+COPY --from=build /go/bin/migrate /app/migrate
+
+CMD ["/app/api"]
+```
+
+ตัวอย่างตอนเอาไปใช้กับ docker-compose ให้เปลี่ยน command มารัน `/app/migrate up` แทน
+
+```yaml
+version: '2.4'
+services:
+	migrate:
+    image: somprasongd/todo-api:1.0.0
+    command: /app/migrate up
+    environment:
+      - TZ=Asia/Bangkok
+      - DB_DRIVER=postgres
+      - DB_HOST=db
+      - DB_PORT=5432
+      - DB_USERNAME=postgres
+      - DB_PASSWORD=S3cretp@ssw0rd
+      - DB_DATABASE=todos
+      - DB_SSLMODE=disable
+    depends_on:
+      db:
+        condition: service_healthy
+```
+
+เท่านี้เราก็สามารถทำ database migrations แยกออกมาจากการรันโปรแกรมได้แล้ว
+
+ดูโค้ดทั้งหมดได้[ที่นี่](https://github.com/somprasongd/blog-code/tree/main/golang/goapi-db-migrate)

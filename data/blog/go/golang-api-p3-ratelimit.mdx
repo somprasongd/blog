@@ -1,0 +1,35 @@
+---
+title: 'API Service with Go: Rate Limit'
+date: '2022-02-03'
+lastmod: '2022-07-18'
+tags: ['api', 'go']
+draft: false
+summary: 'การป้องกัน api ของเราด้วยการกำหนดจำนวนสูงในการรับ request ต่อวินาที'
+---
+
+# Rate Limit
+
+ในบางครั้ง api ของเราจะต้องใช้เวลาในการทำงานนาน ไม่ว่าจะเป็นคิวรี่ข้อมูล หรือไปเรียกใช้งาน api ภายนอก เราจะต้องป้องกัน api ของเราด้วยการกำหนดจำนวนสูงในการรับ request ต่อวินาทีเอาไว้ โดยช้ package **[golang.org/x/time/rate](http://golang.org/x/time/rate)**
+
+**ตัวอย่าง** ถ้าต้องการกำหนดให้รับ 10 req/sec ให้กำหนดแบบนี้ `limiter := rate.Newlimiter(10, 1)` โดย `10` คือจำนวน limit per sec และ `1` คือ ขนาดของ burst size หรือจะกำหนดเป็น `limiter := rate.Newlimiter(5, 5)` ก็ได้
+
+```go:main.go
+package main
+import (
+  "fmt"
+  "log"
+  "net/http"
+  "golang.org/x/time/rate"
+)
+func main() {
+  limiter := rate.NewLimiter(10, 1)
+  http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request){
+    if !limiter.Allow() {
+      w.WriteHeader(http.StatusTooManyRequests)
+      return
+    }
+  fmt.Fprintln(w, "Hello, World")
+  })
+  log.Fatal(http.ListenAndServe(":8080", nil))
+}
+```

@@ -1,0 +1,1002 @@
+---
+title: 'Connect to SQL Database with Bun'
+date: '2022-09-22'
+tags: ['go', 'database', 'orm', 'bun']
+draft: false
+summary: 'แนะำการใช้ Bun ที่เหมือนการรวม SQL Builder + sqlx + Relations เข้าด้วยกัน'
+# images: ['/api/social-image/blog/go/go-fundamentals.jpg']
+---
+
+# Connect to SQL Database with Bun
+
+เนื่องจากส่วนตัวไม่ค่อยชอบใช้ ORM เช่น [GORM](https://somprasongd.work/blog/go/golang-db-part3) เพราะมันมี features เยอะเกินไป แต่ถ้าเขียนด้วย Raw SQL โดยใช้ [database/sql](https://somprasongd.work/blog/go/golang-db-part1) ก็จะลำบากตอนแปลงผลลัพธ์ให้เป็น Go types ต่างๆ (`structs, maps, slices, and scalars`) แต่ก็สามารถใส่ [sqlx](https://somprasongd.work/blog/go/golang-db-part2) มาช่วยตรงนี้ได้
+
+แต่การเขียน Raw SQL ลงไปในโค้ดนั้นค่อนข้างที่จะอ่านยาก จึงอยากได้ SQL builder มาช่วยสร้าง SQL ขึ้นมาแทน ซึ่งไปเจอมาตัวหนึ่ง คือ [Bun](https://bun.uptrace.dev/) ที่จะมาแนะนำในบทความนี้ โดยตัวมันจะมี SQL builder และช่วยแปลงผลลัพธ์ได้เหมือน sqlx แถมยังมี Model Relations เหมือนใน ORM ด้วย
+
+## ความรู้พื้นฐาน
+
+1. ความรู้พื้นฐานภาษา Go
+2. ความรู้เรื่องภาษา SQL
+
+## เนื้อหา
+
+- Bun คืออะไร
+- การเชื่อมต่อฐานข้อมูล
+- การสร้าง Model
+- การเขียน Queries
+- Table Relationships
+- การจัดการ Transactions
+
+## Bun คืออะไร
+
+[Bun](https://bun.uptrace.dev/) บอกว่าตัวมันเป็น Lightweight Golang ORM แบบ **SQL-first** ที่รองรับได้หลายฐานข้อมูล PostgreSQL, MySQL, MSSQL และ SQLite
+
+โดยตัว Bun จะเน้นไปที่เรื่องการช่วยเขียน SQL ซึ่ง Bun ผ่าน [Query Builder](https://bun.uptrace.dev/guide/queries.html) ซึ่งจะต่างจาก ORM อื่นๆ คือ Query Builder ของ Bun สามารถเขียน SQL queries ที่ซับซ้อนได้อีกด้วย เช่น
+
+- เขียน SQL ผ่าน database/sql
+
+```go
+res, err := db.ExecContext(ctx, `WITH regional_sales AS (
+    SELECT region, SUM(amount) AS total_sales
+    FROM orders
+    GROUP BY region
+), top_regions AS (
+    SELECT region
+    FROM regional_sales
+    WHERE total_sales > (SELECT SUM(total_sales)/10 FROM regional_sales)
+)
+SELECT region,
+       product,
+       SUM(quantity) AS product_units,
+       SUM(amount) AS product_sales
+FROM orders
+WHERE region IN (SELECT region FROM top_regions)
+GROUP BY region, product`)
+```
+
+- เขียนแบบ Bun's query builder
+
+```go
+regionalSales := db.NewSelect().
+	ColumnExpr("region").
+	ColumnExpr("SUM(amount) AS total_sales").
+	TableExpr("orders").
+	GroupExpr("region")
+
+topRegions := db.NewSelect().
+	ColumnExpr("region").
+	TableExpr("regional_sales").
+	Where("total_sales > (SELECT SUM(total_sales) / 10 FROM regional_sales)")
+
+err := db.NewSelect().
+	With("regional_sales", regionalSales).
+	With("top_regions", topRegions).
+	ColumnExpr("region").
+	ColumnExpr("product").
+	ColumnExpr("SUM(quantity) AS product_units").
+	ColumnExpr("SUM(amount) AS product_sales").
+	TableExpr("orders").
+	Where("region IN (SELECT region FROM top_regions)").
+	GroupExpr("region").
+	GroupExpr("product").
+	Scan(ctx)
+```
+
+และเนื่องจากตัวมันเป็นเอง Lightweight Golang ORM จะทำให้ไม่มี features ในหลายๆ เรื่องที่ ORM ตัวอื่นๆ มี เช่น เรื่องการทำ automatic migrations, optimizer/index/comment hints, และ database resolver
+
+## การเชื่อมต่อฐานข้อมูล
+
+ในบทความนี้จะใช้ข้อมูลเป็น PostgreSQL โดยจะติดตั้งผ่าน docker
+
+```bash
+docker run \
+--name bun-db \
+-p 2345:5432 \
+-e POSTGRES_PASSWORD=mysecretpassword \
+-e POSTGRES_DB=bun-db \
+-v pg-data-bun:/var/lib/postgresql/data \
+-d postgres:14-alpine
+```
+
+สร้างโปรเจคขึ้นมาใหม่
+
+```bash
+mkdir -p godb-bun
+cd godb-bun
+go mod init godb/bun
+```
+
+สร้างไฟล์ `main.go`
+
+```go
+package main
+
+func main() {
+
+}
+```
+
+ซึ่ง Bun จะทำงานอยู่บน [database/sql](https://pkg.go.dev/database/sql) ดังนั้นให้สร้าง connection จาก `sql.DB` ขึ้นมาก่อน และในบทความนี้จะใช้ระบบฐานข้อมูลเป็น [PostgreSQL](https://www.postgresql.org/) จึงต้องใช้ driver ของ PostgreSQL ด้วย
+
+```go
+package main
+
+import (
+	"database/sql"
+
+	"github.com/uptrace/bun/driver/pgdriver"
+)
+
+func main() {
+	connectDB()
+}
+
+func connectDB() {
+	dsn := "postgres://postgres:mysecretpassword@localhost:5433/bun-db?sslmode=disable"
+
+	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+}
+```
+
+เสร็จแล้วจึงจะเอา connection มาสร้างเป็น `bun.DB` โดยใช้ PostgreSQL [dialect](https://bun.uptrace.dev/guide/drivers.html) ของ Bun
+
+```diff
+package main
+
+import (
+	"database/sql"
+
++	"github.com/uptrace/bun"
++	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+)
+
+func main() {
+	db := connectDB()
++	defer db.Close()
+
+}
+
+-func connectDB() {
++func connectDB() *bun.DB {
+	dsn := "postgres://postgres:mysecretpassword@localhost:5433/bun-db?sslmode=disable"
+
+	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+
++	db := bun.NewDB(sqldb, pgdialect.New())
+
++	return db
+}
+```
+
+สามารถทดสอบการเชื่อมต่อได้โดยใช้ `Ping` ซึ่งเป็นฟังก์ชันของ database/sql
+
+```diff
+func connectDB() {
+	dsn := "postgres://postgres:mysecretpassword@localhost:5433/bun-db?sslmode=disable"
+
+	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+
+	db := bun.NewDB(sqldb, pgdialect.New())
+
++ err := db.Ping()
++	if err != nil {
++		panic(err)
++	}
+
+  return db
+}
+```
+
+### ทดลองคิวรี่ข้อมูล
+
+- สามารถใช้ database/sql ได้เหมือนเดิมทุกอย่าง
+
+```go
+func main() {
+	db := connectDB()
+	defer db.Close()
+
+	ctx := context.Background()
+
+	querySqlDB(ctx, db)
+}
+
+func querySqlDB(ctx context.Context, db *bun.DB) {
+	// execute queries using database/sql
+	res, err := db.ExecContext(ctx, "SELECT 1")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("res: %v\n", res)
+
+	var num int
+	err = db.QueryRowContext(ctx, "SELECT 1").Scan(&num)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("num: %v\n", num)
+}
+```
+
+- ใช้ Bun's query builder ซึ่งต่อไปในบทความนี้จะใช้วิธีนี้
+
+```go
+func main() {
+	db := connectDB()
+	defer db.Close()
+
+	ctx := context.Background()
+
+	querySqlDB(ctx, db)
+}
+
+func queryBunDB(ctx context.Context, db *bun.DB) {
+  // using Bun's query builder
+	res, err := db.NewSelect().ColumnExpr("1").Exec(ctx)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("res: %v\n", res)
+
+	var num int
+	err = db.NewSelect().ColumnExpr("1").Scan(ctx, &num)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Printf("num: %v\n", num)
+}
+```
+
+ซึ่งจะได้ผลลัพธ์ที่ได้จะออกมาเหมือนกัน
+
+### การแสดง queries log
+
+ถ้าหากต้องการให้แสดง SQL queries ออกมาด้วย จะต้องติดตั้ง `bundebug` เพิ่ม และใช้ร่วมกับ [query hook](https://bun.uptrace.dev/guide/hooks.html#query-hooks)
+
+```bash
+go get github.com/uptrace/bun/extra/bundebug
+```
+
+เพิ่ม query hook เพื่อให้แสดง SQL queries ออกมา
+
+```diff
+import (
+	// ...
++	"github.com/uptrace/bun/extra/bundebug"
+)
+
+func connectDB() *bun.DB {
+	dsn := "postgres://postgres:postgres@localhost:5433/godb-bun?sslmode=disable"
+
+	sqldb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+
+	db := bun.NewDB(sqldb, pgdialect.New())
+
++	db.AddQueryHook(bundebug.NewQueryHook())
+
+  err := db.Ping()
+	if err != nil {
+		panic(err)
+	}
+
+	return db
+}
+```
+
+แต่เมื่อรันทดสอบดู จะยังไม่มี queries อะไรแสดงออกมาเลย เนื่องจากค่าเริ่มต้น จะแสดงเฉพาะคำสั่งที่ผิดพลาดเท่านั้น ถ้าต้องการให้แสดงทั้งหมดจะต้องเพิ่ม `WithVerbose` เข้าไปใน options ด้วย
+
+```go
+db.AddQueryHook(bundebug.NewQueryHook(bundebug.WithVerbose(true)))
+```
+
+เมื่อรันใหม่อีกครั้ง จะมี query แสดงออกมาแล้ว
+
+```bash
+[bun]  12:20:36.695   SELECT                  510µs  SELECT 1
+```
+
+## การสร้าง Model
+
+เนื่องจาก Bun เป็น ORM จึงทำให้เราสามารถทำการ mapping ตารางในฐานข้อมูลไปเป็น struct ที่เรียกว่า model ได้อยู่แล้ว โดยอ้างอิงจากชื่อ และชนิดข้อมูลใน struct และยังซึ่งจะใช้ tags `bun` เพื่อแก้ไขได้ ดังนี้
+
+### การกำหนด Table names
+
+Bun จะทำการสร้างชื่อตาราง และ alias จากชื่อของ struct โดยจะแปลงเป็น underscore และทำการ pluralizes เช่น struct ชื่อ `ProductCategory` จะได้ชื่อตารางเป็น `product_categories` และ alias เป็น `product_category`
+
+แต่เราสามรถเปลี่ยนชื่อตารางได้โดยใช้ tag `bun:"table:table_name"` และ alias โดยใช้ tag `bun:"alias:table_alias"` เช่น
+
+```go
+type Task struct {
+	bun.BaseModel `bun:"table:mytasks,alias:t"`
+}
+```
+
+### การกำหนด Column names
+
+ตัว Bun เองจะทำการแปลงชื่อ fileds ของ struct ให้เป็น column names โดยใช้ underscore ให้อยู่แล้ว แต่เราสามารถกำหนดเองได้ โดยใช้ tag `bun:"column_name"`
+
+```go
+type Task struct {
+  ID         int64  `bun:"id"`
+  Text       string `bun:"title"`
+  Completed  bool   `bun:"is_done"`
+}
+```
+
+### การกำหนด Column types
+
+ตัว Bun จะสร้าง column types ตามชนิดข้อมูลของ fileds ใน struct ให้เอง เช่น `string` จะเป็น `varchar` แต่เราสามารถกำหนดเองได้ โดยใช้ tag `bun:"type:column_type"`
+
+```diff
+type Task struct {
+- ID         int64  `bun:"id"`
++ ID         int64  `bun:"id,type:integer"`
+  Text       string `bun:"title"`
+  Completed  bool   `bun:"is_done"`
+}
+```
+
+### การกำหนด Primary key
+
+ในการกำหนดให้ struct field ไหนเป็น primary key จะใช้ tag `bun:",pk"` และจะใช้ร่วมกับ `bun:",autoincrement"` เพื่อกำหนด column type ถ้าเป็น PostgreSQL เป็น `serial` ถ้าเป็น MySQL จะเป็น `autoincrement` ถ้าเป็น MSSQL จะเป็น `identity`
+
+```diff
+type Task struct {
+- ID         int64  `bun:"id,type:integer"`
++ ID         int64  `bun:"id,pk,autoincrement"`
+  Text       string `bun:"title"`
+  Completed  bool   `bun:"is_done"`
+}
+```
+
+<aside>
+💡 `bun:",pk"` จะทำให้ได้ `notnull` ไปด้วย ไม่ต้องกำหนดเพิ่ม
+
+</aside>
+
+### การจัดการค่า NULL
+
+ถ้าต้องการจะใช้ค่า SQL `NULL` สามารถกำหนดชนิดข้อมูลของ fileds ใน struct ให้เป็น pointer หรือใช้ sql.Null* (*คือชนิดข้อมูล) แทนก็ได้ เช่น
+
+```go
+type Item struct {
+    Active *bool
+    // or
+    Active sql.NullBool
+}
+```
+
+เมื่อส่งค่า `(*bool)(nil)` มา จะได้ค่าเป็น `NULL`
+
+**Go zero values and NULL**
+
+ถ้าต้องการแปลงค่า zero value ของ Go ให้เป็น NULL ให้ใช้ tag `bun:",nullzero"` ตัวอย่างเช่น
+
+```diff
+type Task struct {
+  ID         int64  `bun:"id,pk,autoincrement"`
+- Text       string `bun:"title"`
++ Text       string `bun:"title,nullzero"`
+  Completed  bool   `bun:"is_done"`
+}
+```
+
+ทำให้เมื่อบันทึก Text ที่มีค่าว่าง จะถูกเปลี่ยนเป็น NULL แทน
+
+**NOT NULL**
+
+ถ้าต้องการกำหนดให้ column เป็น NOT NULL ให้ใช้ tag `bun:",notnull"` ตัวอย่างเช่น
+
+```diff
+type Task struct {
+  ID         int64  `bun:"id,pk,autoincrement"`
+  Text       string `bun:"title,nullzero"`
+- Completed  bool   `bun:"is_done"`
++ Completed  bool   `bun:"is_done,notnull"`
+}
+```
+
+### การกำหนดค่า DEFAULT
+
+การกำหนด default ใน SQL จะใช้ tag `nullzero`, `notnull` และ`default` ร่วมกัน
+
+```diff
+type Task struct {
+  ID         int64  `bun:"id,pk,autoincrement"`
+- Text       string `bun:"title,nullzero"`
++ Text       string `bun:"title,nullzero,notnull,default:'untitled'"`
+- Completed  bool   `bun:"is_done,notnull"`
++ Completed  bool   `bun:"is_done,notnull,default:false"`
+}
+
+err := db.NewCreateTable().Model((*Task)(nil)).Exec(ctx)
+```
+
+จะได้เป็นออกมาเป็น
+
+```sql
+CREATE TABLE "tasks" (
+  "id"      BIGSERIAL NOT NULL,
+  "title"   VARCHAR NOT NULL DEFAULT 'untitled',
+  "is_done" BOOLEAN NOT NULL DEFAULT false,
+  PRIMARY KEY ("id")
+)
+```
+
+**Automatic timestamps**
+
+โดยปกติแล้วเรามักจะมี columns ที่เก็บเวลาที่สร้าง และแก้ไขข้อมูล เอาไว้ด้วย ถ้าต้องการให้ Bun ทำบันทึกค่าให้อัตโนมัติตอน `INSERT` ให้กำหนดแบบนี้
+
+```go
+type Task struct {
+  ID         int64  `bun:"id,pk,autoincrement"`
+  Text       string `bun:"title,nullzero,notnull,default:'untitled'"`
+  Completed  bool   `bun:"is_done,notnull,default:false"`
+
+  CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+}
+
+res, err := db.NewCreateTable().Model((*Task)(nil)).Exec(ctx)
+```
+
+<aside>
+💡 ถ้าไม่ต้องการให้บันทึก update time ให้ใช้ `UpdatedAt bun.NullTime` แทน
+
+</aside>
+
+## การเขียน Queries
+
+Bun สามารถสร้าง queries ได้ทั้งจาก `bun.DB`, `bun.Tx` หรือ `bun.Conn` ซึ่งสามารถเขียนแบบใช้คำสั่ง SQL ลงไปตรงๆ เลยก็ได้ โดยใช้ `db.ExecContext()` แต่แนะนำให้ใช้ Bun's query builder แทนดีกว่า
+
+สำหรับการทำ CRUD จะมีฟังก์ชัน ดังนี้
+
+- **`db.NewSelect` →** ใช้แทนคำสั่ง `SELECT`
+- **`db.NewInsert` →** ใช้แทนคำสั่ง `INSERT`
+- **`db.NewUpdate` →** ใช้แทนคำสั่ง `UPDATE`
+- **`db.NewDelete` →** ใช้แทนคำสั่ง `DELETE`
+
+และทุกฟังก์ชันจะใช้ `Exce()` ในการสั่ง execute query โดยจะได้ `sql.Result` ออกมา เช่น
+
+```go
+result, err := db.NewInsert().Model(&task).Exec(ctx)
+```
+
+แต่สำหรับ `db.NewSelect` สามารถใช้ `Scan()` แทนได้ และ `sql.Result` จะถูกตัดออกไป
+
+```go
+err := db.NewSelect().Model(&task).Where("id = 1").Scan(ctx)
+
+// หรือ
+err := db.NewSelect().Model((*Task)(nil)).Where("id = 1").Scan(ctx, &user)
+```
+
+ซึ่งสามรถ scan ออกมาเป็นชนิดข้อมูลแบบ
+
+- struct
+- `map[string]interface{}`
+- scalar types
+- slices ของชนิดข้อมูลด้านบน
+
+<aside>
+💡 สามารถใช้ `bun.IDB` ซึ่งเป็น interface เพื่อแทน `bun.DB`, `bun.Tx` หรือ `bun.Conn` ได้
+
+</aside>
+
+### การเพิ่มข้อมูลลง Database
+
+การเพิ่มข้อมูลจะใช้ `db.NewInsert` โดยจะระบุ `Model(&struct)` เข้าไป เพื่อให้ query builder จะสร้างคำสั่ง SQL ออกมาให้จากชื่อตาราง, ชื่อคอลัมน์ และค่า DEFAULT ตามที่เรากำหนดไว้ใน model
+
+```go
+task := Task{
+	Text: "todo 1",
+}
+
+result, err := db.NewInsert().Model(&task).Exec(ctx)
+
+// INSERT INTO "tasks"
+// ("id", "title", "is_done", "created_at", "updated_at")
+// VALUES
+// (DEFAULT, 'todo 1', DEFAULT, DEFAULT, DEFAULT)
+// RETURNING "id", "is_done", "created_at", "updated_at"
+```
+
+สังเกตว่า Bun จะเพิ่ม return ค่าทั้งหมดกลับมาให้ด้วย และทำการอัพเดทค่ากลับเข้าไปใน `&struct` ให้อัตโนมัติ ไม่ต้องทำเองเหมือนกับการใช้ `database/sql` ซึ่งสะดวกมากๆ
+
+```go
+fmt.Println(task)
+// {1 todo 1 false 2022-09-14 13:42:13.36677 +0700 +07 2022-09-14 13:42:13.36677 +0700 +07}
+```
+
+สำหรับการตรวจสอบว่า การเพิ่มรายการใหม่สำเร็จหรือไม่นั้น ให้ตรวจสอบจาก `result.RowsAffected()` ถ้าสำเร็จจะต้องได้ค่ามากกว่า `0`
+
+```go
+func createTask(ctx context.Context, db *bun.DB, task *Task) error {
+	result, err := db.NewInsert().Model(task).Exec(ctx)
+	if err != nil {
+		panic(err)
+	}
+
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected <= 0 {
+		return errors.New("cannot insert")
+	}
+	return nil
+}
+```
+
+### การค้นหาข้อมูลจาก Database
+
+การค้นหาข้อมูลจะใช้ `db.NewSelect` โดยจะใส่ `Model(&sliceOfStruct)` เข้าไป เพื่อให้ Bun รู้ว่าจะต้องไปดึงข้อมูลอกมาจากตารางไหน และใส่ค่ากลับไปยัง model อะไร
+
+```go
+func readTask(ctx context.Context, db *bun.DB) ([]Task, error) {
+	tasks := []Task{}
+	err := db.NewSelect().Model(&tasks).Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, err
+}
+```
+
+**การค้นหาแบบมีเงื่อนไข**
+
+ถ้าเราต้องการเพิ่มเงื่อนไขในการค้นหาจะใช้ `Where` ตัวอย่าง เช่น
+
+- ค้นหาข้อมูลตามสถานะที่ทำเสร็จแล้ว ก็จะเขียนภาษา sql ได้แบบนี้ `select * from tasks where is_done = true`
+- หรือเฉพาะที่ยังไม่เสร็จ `select * from tasks where is_done = false`
+
+ซึ่งค่าสถานะจะเป็น parameter ที่สามารถเปลี่ยนแปลงได้ตามที่ต้องการ สามารถแทนค่าได้โดยการใช้ [placeholders](https://bun.uptrace.dev/guide/placeholders.html) (`?`)
+
+```go
+func readTaskByStatus(ctx context.Context, db *bun.DB, status *bool) ([]Task, error) {
+	tasks := []Task{}
+
+	q := db.NewSelect().Model(&tasks)
+
+	if status != nil {
+		q.Where("is_done = ?", *status)
+	}
+
+	err := q.Scan(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+	return tasks, err
+}
+```
+
+**การค้นหาข้อมูลจาก Primary Key**
+
+การค้นหาจาก Primary Key จะใช้ `WherePK` และแน่นอนว่าข้อมูลจะได้ออกมาแค่ 1 row เท่านั้น ดังนั้นจะต้องใช้ `Model(&struct)` ไปรับค่าออกมา
+
+```go
+func getTaskById(ctx context.Context, db *bun.DB, id int64) (*Task, error) {
+	task := &Task{
+		ID: id,
+	}
+	err := db.NewSelect().Model(task).WherePK().Scan(ctx)
+
+	if err != nil {
+		return nil, err
+	}
+	return task, err
+}
+```
+
+ในกรณีที่ค่า primary key ที่ส่งเข้าไปนั้น ไม่มีอยู่ในตาราง ก็จะได้ error ตอบกลับมา ซึ่งสามารถเพิ่มการตรวจสอบได้ ดังนี้
+
+```go
+if err != nil {
+	if err.Error() == sql.ErrNoRows.Error() {
+		return nil, nil
+	}
+	return nil, err
+}
+```
+
+**การค้นหาแบบ Pagination**
+
+ถ้าข้อมูลเรามีเยอะมาก แต่เราต้องการแบ่งการค้นหาออกเป็นหน้าๆ เช่น หน้าละ 10 rows ใน SQL ทำได้โดยการใช้ `LIMIT X OFFSET Y`
+
+```sql
+SELECT * FROM tasks ORDER BY id ASC LIMIT 10 OFFSET 0; -- first page
+SELECT * FROM tasks ORDER BY id ASC LIMIT 10 OFFSET 10; -- second page
+SELECT * FROM tasks ORDER BY id ASC LIMIT 10 OFFSET 20; -- third page
+```
+
+ใน Bun ก็มี `Limit` และ `Offset` เตรียมไว้ให้ใช้เหมือนกัน
+
+```go
+func readTaskPaging(ctx context.Context, db *bun.DB, page int) ([]Task, error) {
+	if page < 1 {
+		page = 1
+	}
+	tasks := []Task{}
+	err := db.NewSelect().
+		Model(&tasks).
+		Limit(10).
+		Offset((page - 1) * 10).
+		Scan(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return tasks, err
+}
+
+// SELECT "task"."id", "task"."title", "task"."is_done", "task"."created_at", "task"."updated_at" FROM "tasks" AS "task" LIMIT 10
+```
+
+**การนับจำนวน rows**
+
+ใน Bun มี `Count` เตรียมไว้ให้ เพื่อสร้างคำสั่ง `count(*)`
+
+```go
+count, err := db.NewSelect().Model((*Task)(nil)).Count(ctx)
+```
+
+และที่ชอบมากๆ คือ Bun สามารถ select แบบแบ่งหน้า พร้อมสร้างคำสั่งนับจำนวนข้อมูลทั้งหมดด้วยเงื่อนไขเดียวกันขึ้นมาให้ด้วย ในการสั่งครั้งเดียว ทำได้โดยเปลี่ยน `Scan` เป็น `ScanAndCount` ตัว Bun จะไปสร้างคำสั่ง SQL ทั้ง 2 คำสั่งให้เอง
+
+```go
+func readTaskPagingAndCount(ctx context.Context, db *bun.DB, page int) ([]Task, int, error) {
+	if page < 1 {
+		page = 1
+	}
+	tasks := []Task{}
+	count, err := db.NewSelect().
+		Model(&tasks).
+		Limit(10).
+		Offset((page - 1) * 10).
+		ScanAndCount(ctx)
+	if err != nil {
+		return nil, 0, err
+	}
+	return tasks, count, err
+}
+
+// SELECT "task"."id", "task"."title", "task"."is_done", "task"."created_at", "task"."updated_at" FROM "tasks" AS "task" LIMIT 10
+// SELECT count(*) FROM "tasks" AS "task"
+```
+
+### การแก้ไขข้อมูล
+
+การแก้ไขข้อมูลจะใช้ `db.NewUpdate` และระบุ `Model` กับ `Where` เข้าไปด้วย
+
+```go
+func updateTask(ctx context.Context, db *bun.DB, task *Task) error {
+	result, err := db.NewUpdate().Model(task).WherePK().Exec(ctx)
+	if err != nil {
+		panic(err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+
+	if affected <= 0 {
+		return errors.New("no row to update")
+	}
+	return nil
+}
+// UPDATE "tasks" AS "task" SET "title" = 'todo 1', "is_done" = TRUE, "created_at" = '2022-09-14 06:01:03.90468+00:00', "updated_at" = '2022-09-14 06:01:03.90468+00:00' WHERE ("task"."id" = 1)
+```
+
+จากโค้ดด้านบนเมื่อรันแล้วจะพบว่า Bun ได้ทำการ update ค่าให้กับทุก columns จาก fields ที่ไม่ได้กำหนดค่า (zero value) ซึ่งไม่ถูกต้อง เราสามารถเอา fields ที่มีค่าเป็น zero value ออกไปได้ โดยการเพิ่ม `OmitZero` เข้าไปแบนนี้
+
+```go
+result, err := db.NewUpdate().
+		Model(task).
+		OmitZero().
+		WherePK().
+		Exec(ctx)
+```
+
+แต่ค่าสถานะของเราเก็บเป็น boolean ซึ่งมีค่า zero value เป็น false ทำให้ไม่สามารถอัพเดทสถานะเป็น false ได้ถ้าใช้ `OmitZero` ซึ่งแก้ได้โดยการระบุ columns ที่ต้องการ update เข้าไปแทน โดยใช้ `Column`
+
+```go
+result, err := db.NewUpdate().
+		Model(task).
+		Column("is_done").
+		WherePK().
+		Exec(ctx)
+
+// UPDATE "tasks" AS "task" SET "is_done" = TRUE WHERE ("task"."id" = 1)
+```
+
+<aside>
+💡 ถ้าต้องการรับค่าจาก columns อื่นๆ กลับมาหลัง update เสร็จด้วย ให้เพิ่ม `Returning("*")` ก่อน `Exec`
+
+</aside>
+
+### การทำ automatic update time
+
+ใน Bun เมื่อสั่ง Update จะไม่อัพเดทค่า updated_at ให้อัตโนมัติ ซึ่งมีวิธีทำได้ 2 วิธี คือ
+
+1. ใช้ SetColumn เพื่อกำหนดค่าของ updated_at ในคำสั่ง Update
+
+   ```go
+   result, err := db.NewUpdate().
+   		Model(task).
+   		Column("is_done").
+   		SetColumn("updated_at", "DEFAULT").
+   		WherePK().
+   		Exec(ctx)
+   ```
+
+2. ใช้ Model hooks ที่ชื่อว่า \***\*[BeforeAppendModel](https://bun.uptrace.dev/guide/hooks.html#beforeappendmodel)\*\*** มาคอยแก้ไขค่าทั้งก่อน insert และ update โดยให้ implement `bun.BeforeAppendModelHook` เข้าไปใน model ดังนี้
+
+   ```go
+   type Task struct {
+     ID         int64  `bun:"id,pk,autoincrement"`
+     Text       string `bun:"title,nullzero,notnull,default:'untitled'"`
+     Completed  bool   `bun:"is_done,notnull,default:false"`
+
+     CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+   	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+   }
+
+   var _ bun.BeforeAppendModelHook = (*Task)(nil)
+
+   func (m *Model) BeforeAppendModel(ctx context.Context, query bun.Query) error {
+   	switch query.(type) {
+   	case *bun.InsertQuery:
+   		m.CreatedAt = time.Now()
+       m.UpdatedAt = time.Now()
+   	case *bun.UpdateQuery:
+   		m.UpdatedAt = time.Now()
+   	}
+   	return nil
+   }
+   ```
+
+แต่ส่วนตัวจะใช้วิธีแรก เนื่องจากไม่ต้องการให้ Model มี dependencies อะไรเลย
+
+### การลบข้อมูล
+
+การลบข้อมูลจะใช้ `db.NewDelete` และระบุ `Model` กับ `Where` เข้าไปด้วย
+
+```go
+func deleteTask(ctx context.Context, db *bun.DB, id int64) error {
+	_, err := db.NewDelete().Model((*Task)(nil)).Where("id = ?", id).Exec(ctx)
+
+	return err
+}
+// DELETE FROM "tasks" AS "task" WHERE (id = 1)
+```
+
+**การลบข้อมูลแบบ Soft delete**
+
+การทำ Soft delete คือ เมื่อ `db.NewDelete` จะไม่ได้ลบออกไปจากฐานข้อมูลจริงๆ หลัการ คือ
+
+- เพิ่ม column `deleted_at timestamptz` เข้าไปเป็นตัวตรวจสอบ โดยเมื่อสั่งลบ จะไปบันทึกค่าลง `deleted_at`
+
+```sql
+UPDATE tasks SET deleted_at = now() WHERE id = 1
+```
+
+- และเมื่อค้นหาข้อมูลจะค้นหาจาก `deleted_at IS NULL`
+
+```sql
+SELECT * FROM tasks WHERE deleted_at IS NULL
+```
+
+วิธีการทำ คือ ใน model ให้เพิ่ม field `DeletedAt` และใส่ tag `soft_delete` เข้าไปด้วย
+
+```diff
+type Task struct {
+	ID        int64     `bun:"id,pk,autoincrement"`
+	Text      string    `bun:"title,nullzero,notnull,default:'untitled'"`
+	Completed bool      `bun:"is_done,notnull,default:false"`
+	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp"`
++ DeletedAt time.Time `bun:",soft_delete,nullzero"`
+}
+```
+
+เมื่อสั่งลบ
+
+```go
+_, err := db.NewDelete().Model((*Task)(nil)).Where("id = ?", 1).Exec(ctx)
+
+// UPDATE tasks SET deleted_at = current_timestamp WHERE id = 1
+```
+
+เมื่อค้นหา
+
+```go
+err := db.NewSelect().Model(&tasks).Scan(ctx)
+
+// SELECT * FROM tasks WHERE deleted_at IS NULL
+```
+
+ถ้าต้องการดูข้อมูลที่ soft-deleted ไป ใช้ `WhereDeleted()`
+
+```go
+err := db.NewSelect().Model(&tasks).WhereDeleted().Scan(ctx)
+
+// SELECT * FROM tasks WHERE deleted_at IS NOT NULL
+```
+
+ถ้าต้องการดูข้อมูลรวมทั้งหมด ใช้ `WhereAllWithDeleted()`
+
+```go
+err := db.NewSelect().Model(&tasks).WhereAllWithDeleted().Scan(ctx)
+
+// SELECT * FROM tasks
+```
+
+สุดท้ายถ้าต้องการลบข้อมูลที่ soft-deleted ออกไปจากฐานข้อมูลจริงๆ ใช้ `ForceDelete()`
+
+```go
+_, err := db.NewDelete().Model((*Task)(nil)).Where("id = ?", 1).ForceDelete().Exec(ctx)
+
+// DELETE FROM tasks WHERE id = 1 AND deleted_at IS NOT NULL
+```
+
+## Model Relationships
+
+เนื่องจาก Bun นั้น เป็น ORM ดังนั้น เราสามารถเพิ่ม ralation ระหว่าง models ได้ ซึ่งจะเอาไว้ช่วยใน join หรื ดึงข้อมูลตารางอื่นใส่เข้ามาใน model ให้ด้วย
+
+- **has-one** จะเป็นความสัมพันธ์แบบ 1-to-1 โดยจะระบุใน model ของตารางแม่
+
+```go
+type Profile struct {
+	ID     int64 `bun:",pk"`
+	Lang   string
+	UserID int64
+}
+
+type User struct {
+	ID      int64 `bun:",pk"`
+	Name    string
+	Profile *Profile `bun:"rel:has-one,join:id=user_id"`
+}
+```
+
+- **belongs-to** จะกลับด้านโดยจากระบุใน model ของตารางลูก ว่า model ของตารางแม่คืออะไร
+
+```go
+type Profile struct {
+	ID     int64 `bun:",pk"`
+	Lang   string
+	UserID int64
+	User   *User `bun:"rel:belongs-to,join=user_id=id"`
+}
+
+type User struct {
+	ID      int64 `bun:",pk"`
+	Name    string
+	Profile *Profile `bun:"rel:has-one,join:id=user_id"`
+}
+```
+
+- **has-many** จะเป็นความสัมพันธ์แบบ 1-to-many โดยจะระบุใน model ของตารางแม่
+
+```go
+type Task struct {
+	ID        int64 `bun:",pk"`
+	Text      string
+  Completed bool
+	UserID    int64
+	User      *User `bun:"rel:belongs-to,join=user_id=id"`
+}
+
+type User struct {
+	ID      int64   `bun:",pk"`
+	Name    string
+	Tasks   []*Task `bun:"rel:has-many,join:id=user_id"`
+}
+```
+
+- **many-to-many** จะเป็นความสัมพันธ์แบบ many-to-many ของ 2 ตาราง โดยจะตารางตรงกลางที่เชื่อม 2 ตารางนี้เข้าด้วย ซึ่งเมื่อสร้าง model ของตารางกลางขึ้นมาจะต้องทำการ register model นี้เองก่อนเราใช้งานครั้งแรกด้วย ตัวอย่างเช่น การสั่งอาหาร (`Order`) 1 ครั้ง เราสามารถสั่งได้หลายรายการ (`Item`) และแต่ละรายการนั้นก็สามารถถูกสั่งใน `Order` ได้เช่นกัน ดังนั้นจะต้องมี `OrderToItem` เป็นตัวกลางที่เชื่อม `Order` กับ `Item` เข้าด้วยกัน
+
+```go
+func init() {
+    // Register many to many model so bun can better recognize m2m relation.
+    // This should be done before you use the model for the first time.
+    db.RegisterModel((*OrderToItem)(nil))
+}
+
+type Order struct {
+	ID    int64  `bun:",pk"`
+    // Order and Item in join:Order=Item are fields in OrderToItem model
+	Items []Item `bun:"m2m:order_to_items,join:Order=Item"`
+}
+
+type Item struct {
+	ID int64 `bun:",pk"`
+}
+
+type OrderToItem struct {
+	OrderID int64  `bun:",pk"`
+	Order   *Order `bun:"rel:belongs-to,join:order_id=id"`
+	ItemID  int64  `bun:",pk"`
+	Item    *Item  `bun:"rel:belongs-to,join:item_id=id"`
+}
+```
+
+## การจัดการ Transactions
+
+ในบางครั้ง การบันทึกข้อมูลลงฐานข้อมูลไม่ได้จบใน statement เดียว อาจจะต้อง insert หลายๆ statement หรือทั้ง insert, update และ delete ตารางอื่นด้วย ในการทำงานครั้งเดียวกัน ถ้างานใดงานหนึ่งเกิดข้อผิดพลาด เราจะต้องทำการ rollback ทั้งหมด กลับไปเหมือนเดิม ซึ่งจะต้องใช้ transaction (`bun.Tx`) มาจัดการ
+
+- การสั่งเริ่ม transaction
+
+```go
+tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+```
+
+- การ commit เมื่อทุกอย่างทำงานสำเร็จ
+
+```go
+err := tx.Commit()
+```
+
+- การ rollback เมื่อเกิดข้อผิดพลาด
+
+```go
+err := tx.Rollback()
+```
+
+### ตัวอย่างการใช้งาน
+
+```go
+func useTx(ctx context.Context, db *bun.DB) error {
+	task := Task{
+		Text: "do something",
+	}
+
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return err
+	}
+
+	tx.NewInsert().Model(&task).Exec(ctx)
+
+	id := task.ID
+
+	_, err = tx.NewUpdate().
+		Model((*Task)(nil)).
+		Column("is_done").
+		SetColumn("is_done", "?", "done").
+		Where("id = ?", id).
+		Exec(ctx)
+
+	if err != nil {
+		tx.Rollback()
+		return err
+	}
+
+	tx.Commit()
+	return nil
+}
+```
+
+โค้ดด้านบนจะ error เพราะ is_done มีค่าเป็น boolean
+
+```bash
+[bun]  16:39:26.977   BEGIN                   846µs  BEGIN
+[bun]  16:39:26.981   INSERT                2.532ms  INSERT INTO "tasks" ("id", "title", "is_done", "created_at", "updated_at") VALUES (DEFAULT, 'do something', DEFAULT, DEFAULT, DEFAULT) RETURNING "id", "is_done", "created_at", "updated_at"
+[bun]  16:39:26.986   UPDATE                3.531ms  UPDATE "tasks" AS "task" SET is_done = 'done' WHERE (id = 17)        pgdriver.Error: ERROR: invalid input syntax for type boolean: "done" (SQLSTATE=22P02)
+[bun]  16:39:26.988   ROLLBACK              1.513ms  ROLLBACK
+```
+
+จะเห็นว่า คำสั่งทั้งหมดจะถูก rollback กลับไป
+
+---
+
+## สรุป
+
+การใช้ Bun เหมือนเป็นการรวม SQL Builder + sqlx + Relations เข้าด้วยกัน หรือก็คือ
+
+- Bun เป็นเครื่องมือช่วยในการเขียน SQL queries
+- Bun มีการ Marshal rows ไปเป็น `structs, maps, slices` ได้เหมือน [sqlx](http://jmoiron.github.io/sqlx/)
+- มีการทำ Model relationships ได้เหมือน ORM อื่นๆ
+
+แต่ข้อเสียอย่างหนึ่ง คือ comunity ค่อนเล็กมากๆ ถ้าติดปัญหาอะไรก็หาคนช่วยได้น้อย

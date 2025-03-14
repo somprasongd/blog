@@ -1,0 +1,75 @@
+---
+title: 'Liveness Probe and Readiness Probe'
+date: '2022-02-06'
+lastmod: '2022-07-18'
+tags: ['k8s', 'go']
+draft: false
+summary: 'จัดการ Liveness Probe กับ Readiness Probe เมื่อ Deploy บน Kubernetes'
+---
+
+# Liveness Probe and Readiness Probe
+
+ถ้าเรามี Service ที่ต้องนำไป Deploy บน Kubernetes ตัว Service ของเราจะต้องทำให้รองรับอีก 2 เรื่อง คือ
+
+1. **Liveness Probe** คือ k8s จะเรียกเพื่อทำการตรวจสอบว่า API ของเรายังทำงานอยู่หรือเปล่า สามารถทำได้หลายวิธี เช่น เรียกผ่าน http หรือ tcp เข้ามาถาม หรือทำการ cat file แต่เมื่อระบบของเรามีการทำ Graceful Shutdown เอาไว้ มันจะหยุดรับ request เข้ามา ซึ่งทำให้การเรียกผ่าน http เข้ามาจะทำไม่ได้ในขณะที่เกิด Graceful Shutdown ดังนั้นควรใช้วิธี cat file แทน ถ้าเจอไฟล์จะได้ status 0 กลับไป
+2. **Readiness Probe** คือ เอาไว้ตรวจสอบว่า service พร้อมให้บริการแล้วรึยัง เช่น เมื่อเริ่มต้นโปรแกรม จะต้องไปเชื่อมต่อฐานข้อมูลก่อน หรือต้องเตรียมอะไรบางอย่างที่ใช้เวลาให้เสร็จก่อน จึงจะเปิดรับ request เข้ามาได้
+
+### วิธีการทำ Liveness Probe
+
+จะใช้วิธีการสร้าง temp file ขึ้นมา และเมื่อปิดระบบไปก็จะลบไฟล์นี้ทิ้งไปด้วย
+
+**ในส่วนโค้ด** ให้เพิ่มการสร้างไฟล์เมื่อเริ่มโปรแกรม และลบไฟล์ทิ้งเมื่อจบโปรแกรม
+
+```go:main.go
+func main() {
+  f, err := os.Create("./tmp-live")
+	if err != nil {
+		log.Fatal(err)
+	}
+	f.Close()
+	defer os.Remove("./tmp-live")
+
+  // ...
+}
+```
+
+**ในส่วน k8s** ให้เรียกคำสั่ง cat file ที่สร้างไว้
+
+```yaml
+livenessProbe:
+  exce:
+    command:
+      - cat
+      - /tmp/live
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
+
+### วิธีการทำ Readiness Probe
+
+จะใช้วิธีเพิ่ม route ขึ้นมา เมื่อมีการเรียกเข้ามาให้คืนสถานะ `200 OK` กลับไป
+
+**ในส่วนโค้ด** ให้เพิ่ม `/healthz` และ `return 200 OK` กลับไป
+
+```go:main.go
+func setupRouter(r *mux.Router) {
+  todo.HandleFunc("/healthz", handleHealthz).Methods(http.MethodGet)
+
+  // ...
+}
+
+func handleHealthz(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+}
+```
+
+**ในส่วน k8s** ให้เรียกไปยัง **/healthz**
+
+```yaml
+readinessProbe:
+  httpGet:
+    path: /healthz
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+```
