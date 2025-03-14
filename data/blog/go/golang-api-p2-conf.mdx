@@ -1,0 +1,310 @@
+---
+title: 'API Service with Go: Configuration'
+date: '2022-02-02'
+lastmod: '2022-07-18'
+tags: ['api', 'go', 'env']
+draft: false
+summary: 'ค่า configurations ต่างๆ ในโปรแกรม ไม่ควรระบุลงไปในโค้ดตรงๆ แล้วจะมีวิธีการจัดการอย่างไร'
+---
+
+# Configuration
+
+ค่า configurations ต่างๆ ในโปรแกรม เช่น server port และ dsn สำหรับ database ไม่ควรระบุลงไปในโค้ดตรงๆ ควรที่จะเปลี่ยนแปลงได้ตามค่า environments เมื่อถูกนำไป deploy
+
+ซึ่งในภาษา Go สามารถอ่านค่า environment ได้จาก `os.Getenv("KEY")`
+
+```go
+// starting server
+port := os.Getenv("APP_PORT")
+log.Printf("Starting server at port %v\n", port)
+log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), handler))
+```
+
+เมื่อรันโปรแกรมทุกครั้ง เราจะต้องกำหนดค่า `APP_PORT` มาด้วยเสมอ และถ้ามี environment หลายตัว ก็ต้องพิมพ์ระบุไปทุกครั้ง
+
+```bash
+$ APP_PORT=8081 go run .
+2022/02/02 10:10:52 Starting server at port 8081
+```
+
+### ถ้าไม่ต้องการกำหนดค่าทุกครั้ง
+
+ในขณะที่กำลังพัฒนาอยู่ถ้าต้องรัน และมากำหนดค่าแบบนี้ไม่สะดวกแน่ๆ หรือบางครั้งก็อาจใส่ไม่ครบบ้างรันโปรแกรมไม่ได้อีก เราสามารถทำยังไงได้บ้าง
+
+วิธีการง่ายๆ เราสามารถสร้างเป็น utility functionเพื่อกำหนดค่า default และแปลงชนิดข้อมูล
+
+```go:util/env.go
+package util
+
+import (
+	"os"
+	"strconv"
+)
+
+func GetEnv(key string, defaultValue string) string {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return defaultValue
+	}
+	return val
+}
+
+func GetEnvInt(key string, defaultValue int) int {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return defaultValue
+	}
+	v, err := strconv.Atoi(val)
+	if err != nil {
+		return defaultValue
+	}
+	return v
+}
+
+func GetEnvBool(key string, defaultValue bool) bool {
+	val, ok := os.LookupEnv(key)
+	if !ok {
+		return defaultValue
+	}
+	v, err := strconv.ParseBool(val)
+	if err != nil {
+		return defaultValue
+	}
+	return v
+}
+```
+
+ตัวอย่างการใช้งาน
+
+```go
+// starting server
+port := util.GetEnvInt("APP_PORT", 8080)
+log.Printf("Starting server at port %v\n", port)
+log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), handler))
+```
+
+แต่วิธีข้างต้นก็ยังไม่สามารถกำหนดค่า default ได้ทุกตัว ดังนั้นจะใช้อีกวิธี คือ ในระหว่างที่กำลังพัฒนาอยู่จะให้มาอ่าน config จากไฟล์ ส่วนเมื่อนำไป deploy ใช้งานจริง ก็ให้ไปอ่านค่าออกมาจาก environment
+
+package ที่นิยมใช้งานกัน คือ [godotenv](https://github.com/joho/godotenv) ซึ่งสามารถกำหนดค่าแบบ key=value ผ่านไฟล์ `.env` แต่ในบทความนี้จะแนะนำการใช้งาน [viper](https://github.com/spf13/viper) แทน เพราะสามารถ config ค่าได้หลายรูปแบบ เช่น yaml
+
+- ติดตั้ง viper `go get github.com/spf13/viper`
+- ใส่ค่า config ลงในไฟล์ `config.yaml` ตามนี้
+
+```yaml
+app:
+  port: 8080
+
+db:
+  driver: 'postgres'
+  host: 'john.db.elephantsql.com'
+  port: 5432
+  username: 'fcricryh'
+  password: 'F5a7wATfocTUNww1Dm14AfebtPaysqIn'
+  database: 'fcricryh'
+```
+
+- โหลดไฟล์ config โดยเพิ่มไฟล์ `config/config.go`
+
+```go:config/config.go
+package config
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/spf13/viper"
+)
+
+func LoadConfig() {
+	viper.SetConfigName("config")                          // กำหนดชื่อไฟล์ config (without extension)
+	viper.SetConfigType("yaml")                            // ระบุประเภทของไฟล์ config
+	viper.AddConfigPath(".")                               // ระบุตำแหน่งของไฟล์ config อยู่ที่ working directory
+
+	err := viper.ReadInConfig() // อ่านไฟล์ config
+	if err != nil {             // ถ้าอ่านไฟล์ config ไม่ได้ให้ panic ไปเลย
+		panic(fmt.Errorf("fatal error config file: %w", err))
+	}
+}
+```
+
+- การเรียกใช้งาน ใช้ `viper.GetXXX("ชื่อใช้ . dot notation")`
+
+```go:main.go
+func main() {
+	config.LoadConfig()
+	database.ConnectDB()
+  // ...
+	// starting server
+	port := viper.GetInt("app.port")
+	log.Printf("Starting server at port %v\n", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), handler))
+}
+```
+
+- แต่เนื่องจากเมื่อนำไป deploy ใช้งานจริง ใส่ค่า environment มาในรูปแบบ `APP_PORT` ดังนั้นต้องเพิ่ม config ให้แปลงค่า environment ให้ด้วย และต้องไม่ `panic` ถ้าไม่ใช้ไฟล์ config
+
+```go:config/config.go
+func init() {
+	viper.SetConfigName("config")                          // กำหนดชื่อไฟล์ config (without extension)
+	viper.SetConfigType("yaml")                            // ระบุประเภทของไฟล์ config
+	viper.AddConfigPath(".")                               // ระบุตำแหน่งของไฟล์ config อยู่ที่ working directory
+	viper.AutomaticEnv()                                   // ให้อ่านค่าจาก env มา replace ในไฟล์ config
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // แปลง _ underscore ใน env เป็น . dot notation ใน viper
+
+	err := viper.ReadInConfig() // อ่านไฟล์ config
+	if err != nil {             // ถ้าอ่านไฟล์ config ไม่ได้ให้ข้ามไปเพราะให้เอาค่าจาก env มาแทนได้
+		fmt.Println("please consider environment variables", err.Error())
+	}
+}
+
+// APP_PORT=8081 go run .
+```
+
+- เพิ่มกำหนดค่า default เช่น ถ้าไม่ได้ระบุ app.port มา ให้ default เป็น 8080
+
+```go:config/config.go
+func LoadConfig() {
+	viper.SetConfigName("config")                          // กำหนดชื่อไฟล์ config (without extension)
+	viper.SetConfigType("yaml")                            // ระบุประเภทของไฟล์ config
+	viper.AddConfigPath(".")                               // ระบุตำแหน่งของไฟล์ config อยู่ที่ working directory
+	viper.AutomaticEnv()                                   // ให้อ่านค่าจาก env มา replace ในไฟล์ config
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // แปลง _ underscore ใน env เป็น . dot notation ใน viper
+
+	err := viper.ReadInConfig() // อ่านไฟล์ config
+	if err != nil {             // ถ้าอ่านไฟล์ config ไม่ได้ให้ข้ามไปเพราะให้เอาค่าจาก env มาแทนได้
+		fmt.Println("please consider environment variables", err.Error())
+	}
+
+  // กำหนด Default Value
+	viper.SetDefault("app.port", 8080)
+}
+```
+
+- สามารถสร้าง struct ขึ้นมารับค่า config เพื่อให้สะดวกต่อการใช้งานได้
+
+```go:config/config.go
+package config
+
+import (
+	"fmt"
+	"log"
+	"strings"
+
+	"github.com/spf13/viper"
+)
+
+type configuration struct {
+	App appConfig
+	Db  dbConfig
+}
+
+type appConfig struct {
+	Port uint
+}
+
+type dbConfig struct {
+	Driver   string
+	Host     string
+	Port     uint
+	Username string
+	Password string
+	Database string
+}
+
+var Config *configuration
+
+func LoadConfig() {
+	viper.SetConfigName("config")                          // กำหนดชื่อไฟล์ config (without extension)
+	viper.SetConfigType("yaml")                            // ระบุประเภทของไฟล์ config
+	viper.AddConfigPath(".")                               // ระบุตำแหน่งของไฟล์ config อยู่ที่ working directory
+	viper.AutomaticEnv()                                   // ให้อ่านค่าจาก env มา replace ในไฟล์ config
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // แปลง _ underscore ใน env เป็น . dot notation ใน viper
+
+	err := viper.ReadInConfig() // อ่านไฟล์ config
+	if err != nil {             // ถ้าอ่านไฟล์ config ไม่ได้ให้ข้ามไปเพราะให้เอาค่าจาก env มาแทนได้
+		fmt.Println("please consider environment variables", err.Error())
+	}
+
+	// กำหนด Default Value
+	viper.SetDefault("app.port", 8080)
+
+	// Decode config ด้วย Unmarshling
+	Config = &configuration{}
+	err = viper.Unmarshal(Config)
+	if err != nil {
+		log.Fatalf("unable to decode config into struct, %v", err)
+	}
+}
+```
+
+<aside>
+💡 เรียกใช้งานผ่าน struct ได้เลย `port := config.Config.App.Port`
+
+</aside>
+
+- แต่ ณ ตอนที่เขียนบทความนี้ การ Decode config ด้วยการทำ Unmarshling นั้นไม่สามารถใช้ได้กับการอ่านค่า config จากค่า environments ผ่าน `viper.AutomaticEnv()` ดังนั้นเราจะใช้วิธีสร้าง struct Config ขึ้นมาเองแทน
+
+```go:config/config.go
+func LoadConfig() {
+	// ...
+
+	// กำหนด Default Value
+	viper.SetDefault("app.port", 8080)
+
+	Config = &configuration{
+		App: appConfig{
+			Port: viper.GetUint("app.port"),
+		},
+		Db: dbConfig{
+			Driver:   viper.GetString("db.driver"),
+			Host:     viper.GetString("db.host"),
+			Port:     viper.GetUint("db.port"),
+			Username: viper.GetString("db.username"),
+			Password: viper.GetString("db.password"),
+			Database: viper.GetString("db.database"),
+		},
+  }
+  // err = viper.Unmarshal(Config)
+	// if err != nil {
+	// 	log.Fatalf("unable to decode config into struct, %v", err)
+	// }
+}
+```
+
+- สุดท้ายให้เพิ่มการตรวจสอบว่าได้กำหนดค่า config มาครบหรือไม่ โดยใช้ [validator](https://github.com/go-playground/validator)
+
+```go:config/config.go
+func LoadConfig() {
+  // ...
+
+	// ตรวจสอบว่ากำหนดค่ามาครบหรือไม่
+	validate := validator.New()
+
+	err = validate.Struct(Config)
+	if err != nil {
+		log.Fatalf("load config error, %v", err)
+	}
+}
+```
+
+- เรียกใช้งาน
+
+```go:main.go
+func main() {
+	config.LoadConfig()
+	database.ConnectDB()
+  // ...
+	// starting server
+	port := config.Config.App.Port
+	log.Printf("Starting server at port %v\n", port)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%v", port), handler))
+}
+```
+
+## สรุป
+
+เมื่อเราเปลี่ยนการกำหนดค่า configurations ทั้งหมดในโปรแกรม มาใช้วิธีอ่านค่าจาก environments ทำให้เราสามารถแยกโค้ดกับ configurations ออกจากกันได้
+
+ดังนั้น เมื่อเรา push โค้ดขึ้น git จะทำให้ข้อมูลที่เป็นความลับ เช่น apikey หรือ database password จะไม่หลุดออกไป
+
+และทำให้การเปลี่ยนแปลงค่า configurations เมื่อนำไป deploy สามารถแก้ไขได้อิสระ โดยไม่ต้องมาแก้ไขโค้ดของเรา

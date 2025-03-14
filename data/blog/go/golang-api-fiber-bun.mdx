@@ -1,0 +1,1777 @@
+---
+title: 'CRUD API in Go with Fiber and Bun ORM'
+date: '2022-09-23'
+lastmod: '2022-09-23'
+tags: ['go', 'api', 'fiber', 'bun']
+draft: false
+summary: 'สร้าง CRUD API ง่ายๆ ด้วย Fiber และ Bun ORM'
+---
+
+# CRUD API in Go with Fiber and Bun ORM
+
+ในบทความนี้จะพาทำ Todo List API ซึ่งเป็น CRUD API ง่ายๆ ด้วย Go [Fiber](https://docs.gofiber.io/) ซึ่งเป็น web framework ในภาษา Go ที่ได้แรงบันดาลใจมากจาก [Express](https://expressjs.com/) ของ Node.js โดยตัว Fiber นั่นจะทำงานอยู่บน Fasthttp ซึ่งเค้าบอกว่าเป็น HTTP engine ที่เร็วที่สุดใน Go อีกด้วย และจะใช้ Bun ORM ต่อกับฐานข้อมูล PostgreSQL
+
+## ความรู้พื้นฐาน
+
+- พื้นฐานภาษา [Go](https://somprasongd.work/blog/go/golang-part1)
+- พื้นฐานการใช้ [Bun ORM](https://somprasongd.work/blog/go/golang-db-part4-bun)
+
+## เนื้อหา
+
+- สิ่งที่กำลังจะทำคืออะไร
+- เตรียมโปรเจคใหม่
+- สร้าง HTTP Web Server ด้วย Fiber
+- การจัดการ Routes
+- สร้าง TodoHandler
+- DTO และทำ Validation
+- การใช้งาน Middleware
+- การ Deploy ด้วย docker-compose
+
+## สิ่งที่กำลังทำคืออะไร
+
+โปรเจคที่กำลังจะทำนี้ เราจะสร้าง Todo List API ที่เป็น CRUD base API แล้วเก็บข้อมูลไว้ในฐานข้อมูล PostgreSQL ซึ่งจะมี routes ทั้งหมด ตามนี้
+
+| Method | Endpoint          | Description                       |
+| ------ | ----------------- | --------------------------------- |
+| POST   | /api/v1/todos     | สำหรับรับ JSON มาสร้างรายการใหม่  |
+| GET    | /api/v1/todos     | สำหรับเรียกดูรายการทั้งหมด        |
+| GET    | /api/v1/todos/:id | สำหรับดึงรายการจาก id ที่ระบุมา   |
+| PATCH  | /api/v1/todos/:id | สำหรับอัพเดทสถานะจาก id ที่ระบุมา |
+| DELETE | /api/v1/todos/:id | สำหรับลบรายจาก id ที่ระบุมา       |
+
+### ติดตั้ง PostgreSQL
+
+ก่อนจะเราสร้างโปรเจคเรามาเตรียมฐานข้อมูลที่จะใช้งานกันก่อน ในบทความจะติดตั้ง PostgreSQL โดยใช้ Docker มีวิธีติดตั้งดังนี้
+
+```bash
+docker volume create pg-todo-db-dev
+
+docker run \
+--name todo-db-dev \
+-p 2345:5432 \
+-e POSTGRES_PASSWORD=mysecretpassword \
+-e POSTGRES_DB=todo-db \
+-v pg-todo-db-dev:/var/lib/postgresql/data \
+-d postgres:14-alpine
+```
+
+### เตรียมฐานข้อมูล
+
+เนื่องจากในบทความความจะใช้ Bun ORM ที่ตัว Bun นั้นไม่มีความสามารถในการทำ Automigration เหมือนอย่าง ORM ตัวอื่นๆ ดังนั้น เราจะต้องจัดการสร้างตารางที่จะขึ้นมาเองก่อน
+
+- **วิธีแรก** ใช้ psql ในการสร้างตาราง
+
+  ```bash
+  docker exec -it todo-db psql -U postgres -d todo-db
+
+  CREATE TABLE "todos" (
+    "id" BIGSERIAL NOT NULL,
+    "title" VARCHAR NOT NULL,
+    "is_done" BOOLEAN NOT NULL DEFAULT false,
+    "created_at" TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    "updated_at" TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+    PRIMARY KEY ("id")
+  );
+
+  \q
+  ```
+
+- **วิธีที่สอง** ใช้เครื่องมือในการทำ migration ซึ่งใน Go นั้นมีอยู่หลายตัว แต่ในบทความนี้จะใช้ [migration](https://github.com/golang-migrate/migrate) ผ่าน docker
+
+  - สร้างไฟล์ migration ว่า create_todo
+
+    ```bash
+    # Linux, mac
+    docker run --rm -v $(pwd)/migrations:/migrations migrate/migrate -verbose create -ext sql -dir /migrations create_todo
+
+    # Windows Powershell
+    docker run --rm -v $pwd/migrations:/migrations migrate/migrate -verbose create -ext sql -dir /migrations create_todo
+
+    // 2022/09/15 09:30:30 /migrations/20220915093030_create_todo.up.sql
+    // 2022/09/15 09:30:30 /migrations/20220915093030_create_todo.down.sql
+    ```
+
+  - เพิ่มคำสั่งสร้างตารางในไฟล์ `timestamp_create_todo.up.sql`
+    ```sql
+    CREATE TABLE "todos" (
+      "id" BIGSERIAL NOT NULL,
+      "title" VARCHAR NOT NULL,
+      "is_done" BOOLEAN NOT NULL DEFAULT false,
+      "created_at" TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+      "updated_at" TIMESTAMPTZ NOT NULL DEFAULT current_timestamp,
+      PRIMARY KEY ("id")
+    );
+    ```
+  - แก้ไขไฟล์ `timestamp_create_todo.down.sql` เพื่อ drop ตารางออก สำหรับการ rollback เวอร์ชัน
+    ```sql
+    DROP TABLE "todos";
+    ```
+  - สั่ง migrate เพื่อสร้างตารางในฐานข้อมูล
+
+    ```sql
+    # Linux, mac
+    docker run --rm --network host -v $(pwd)/migrations:/migrations migrate/migrate -verbose -path=/migrations/ -database "postgresql://postgres:mysecretpassword@localhost:2345/todo-db?sslmode=disable" up
+
+    # Windows Powershell
+    docker run --rm --network host -v $pwd/migrations:/migrations migrate/migrate -verbose -path=/migrations/ -database postgresql://postgres:mysecretpassword@localhost:2345/todo-db?sslmode=disable up
+    ```
+
+โดยจะแนะนำให้ใช้วิธีที่สองจะดีกว่า เพราะเราจะได้มีไฟล์ migrations ไว้ใช้ตอนติดต่อใช้งานจริงด้วย
+
+## เตรียมโปรเจคใหม่
+
+มาถึงขั้นตอนการสร้างโปรเจคใหม่ โดยจะใช้ชื่อว่า `goapi-fiber-bun`
+
+```bash
+mkdir -p goapi-fiber-bun
+cd goapi-fiber-bun
+go mod init goapi
+mkdir cmd
+touch cmd/main.go
+```
+
+เมื่อสร้างโปรเจคขึ้นมาแล้ว ก่อนที่จะไปลงมือทำ API กัน เราจะมาเตรียมโปรเจคให้พร้อมก่อน ดังนี้
+
+- จัดการเรื่อง Configuration ของระบบ
+- เชื่อมต่อฐานข้อมูล
+- สร้าง Model
+- จัดการเรื่องการ Logging ของระบบ
+
+### จัดการเรื่อง Configuration ของระบบ
+
+ในโปรเจคนี้จะสร้าง HTTP Web Server ซึ่งแน่นอนว่าจะมีการระบุ PORT ที่จะเปิดใช้งาน และมีการใช้งานระบบฐานข้อมูล ซึ่งจะต้องมีการระบุ DSN เพื่อใช้ในการเชื่อมต่อ
+
+โดยทั้ง 2 ค่านี้ มันสามารถเปลี่ยนแปลง ดังนั้นเราจะแยกออกมาไว้ในไฟล์ config เพื่อใช้ในขั้นตอนพัฒนา แล้วเรียกใช้ผ่าน enviroments เมื่อนำไปใช้งานจริง
+
+ในบทความนี้จะใช้ [viper](https://somprasongd.work/blog/go/golang-api-p2-conf) มาช่วยในการจัดการ มันขั้นตอนดังนี้
+
+สร้างไฟล์ `pkg/common/config/config.go` เพื่อ load config
+
+```go:pkg/common/config/config.go
+package config
+
+import (
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/spf13/viper"
+)
+
+type Config struct {
+	Port int
+	Dsn  string
+}
+
+func LoadConfig() (c Config, err error) {
+	viper.AddConfigPath(".")                               // ระบุตำแหน่งของไฟล์ config อยู่ที่ working directory
+	viper.SetConfigName("config")                          // กำหนดชื่อไฟล์ config (without extension)
+	viper.SetConfigType("yaml")                            // ระบุประเภทของไฟล์ config
+	viper.AutomaticEnv()                                   // ให้อ่านค่าจาก env มา replace ในไฟล์ config
+	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_")) // แปลง _ underscore ใน env เป็น . dot notation ใน viper
+
+	// อ่านไฟล์ config
+	e := viper.ReadInConfig()
+	if e != nil { // ถ้าอ่านไฟล์ config ไม่ได้ให้ข้ามไปเพราะให้เอาค่าจาก env มาแทนได้
+		fmt.Println("please consider environment variables", e.Error())
+	}
+
+	// กำหนด Default Value
+	viper.SetDefault("port", 3000)
+	// err = viper.Unmarshal(&c) // ใช้กับ AutomaticEnv ไม่ได้ต้องทำเอง
+	c = Config{
+		Port: viper.GetInt("port"),
+		Dsn:  viper.GetString("dsn"),
+	}
+	err = nil
+	if len(c.Dsn) == 0 {
+		err = errors.New("env DSN is required")
+	}
+
+	return
+}
+```
+
+สร้างไฟล์ `config.yaml`
+
+```yaml:config.yaml
+port: 3000
+dsn: 'postgres://postgres:mysecretpassword@localhost:5433/todo-db?sslmode=disable'
+```
+
+เมื่อเริ่มต้นการทำงาน เราจะโหลดค่า config เป็นอย่างแรก ถ้าโหลดไม่ได้ก็ให้หยุดทำงานออกไปเลย
+
+```go:cmd/main.go
+package main
+
+import (
+	"fmt"
+	"goapi/pkg/common/config"
+)
+
+func main() {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println(cfg)
+}
+```
+
+### เชื่อมต่อฐานข้อมูล
+
+ในบทความนี้เราจะใช้ Bun ORM ในการเชื่อมต่อกกับฐานข้อมูล PostgreSQL โดยให้สร้างไฟล์ `pkg/common/database/database.go` ขึ้นมา
+
+```go:pkg/common/database/database.go
+package database
+
+import (
+	"database/sql"
+
+	"github.com/uptrace/bun"
+	"github.com/uptrace/bun/dialect/pgdialect"
+	"github.com/uptrace/bun/driver/pgdriver"
+	"github.com/uptrace/bun/extra/bundebug"
+)
+
+func Init(dsn string) (*bun.DB, func(), error) {
+	// Open a PostgreSQL database.
+	pgdb := sql.OpenDB(pgdriver.NewConnector(pgdriver.WithDSN(dsn)))
+
+	// Create a Bun db on top of it.
+	db := bun.NewDB(pgdb, pgdialect.New())
+
+	// Print all queries to stdout.
+	db.AddQueryHook(bundebug.NewQueryHook(bundebug.WithVerbose(true)))
+
+	err := db.Ping()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	closeDb := func() {
+		db.Close()
+	}
+
+	return db, closeDb, nil
+}
+```
+
+สร้างการเชื่อมต่อฐานข้อมูลใน `cmd/main.go` ถ้าเชื่อมต่อไม่ได้ก็ให้โปรแกรมหยุดทำงานทันที
+
+```go:cmd/main.go
+package main
+
+import (
+	"fmt"
+	"goapi/pkg/common/config"
+	"goapi/pkg/common/database"
+)
+
+func main() {
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		panic(err)
+	}
+
+	db, closeDb, err := database.Init(cfg.Dsn)
+	if err != nil {
+		panic(err)
+	}
+	defer closeDb()
+	fmt.Println(db)
+}
+```
+
+### สร้าง Model
+
+เราจะสร้าง Model ชื่อว่า Todo ซึ่งจะทำเป็น ORM จากตาราง `todos` ที่สร้างเอาไว้โดยใช้ tag `bun` โดยให้สร้างไฟล์ `pkg/models/todo.go`
+
+```go:pkg/models/todo.go
+package models
+
+import "time"
+
+type Todo struct {
+	ID     int    `bun:"id,pk,autoincrement"`
+	Title  string `bun:"title,nullzero,notnull"`
+	IsDone bool   `bun:"is_done,notnull,default:false"`
+
+	CreatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+	UpdatedAt time.Time `bun:",nullzero,notnull,default:current_timestamp"`
+}
+```
+
+### จัดการเรื่องการ Logging ของระบบ
+
+การ logging ของระบบเป็นอีกเรื่องที่ควรทำต้องแต่เริ่มต้นเลย ในบทความจะใช้ [zap](https://somprasongd.work/blog/go/golang-api-p5-log) ใในการจัดการ โดยให้สร้างไฟล์ `common/logger/logger.go` ขึ้นมา
+
+```go:common/logger/logger.go
+package logger
+
+import (
+	"os"
+
+	"go.elastic.co/ecszap"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+)
+
+var zlog *zap.Logger
+
+func init() {
+	var err error
+
+	mode := os.Getenv("APP_MODE")
+	var config zap.Config
+	if mode == "production" {
+		config = zap.NewProductionConfig()
+	} else {
+		config = zap.NewDevelopmentConfig()
+	}
+
+	config.EncoderConfig = ecszap.ECSCompatibleEncoderConfig(config.EncoderConfig)
+	zlog, err = config.Build(ecszap.WrapCoreOption(), zap.AddCallerSkip(1))
+
+	if err != nil {
+		panic(err)
+	}
+}
+
+func WithFields(source map[string]interface{}) *zap.Logger {
+	fields := ToFields(source)
+	for k, v := range source {
+		fields = append(fields, zap.Any(k, v))
+	}
+	return zlog.With(fields...)
+}
+
+func ToFields(source map[string]interface{}) []zapcore.Field {
+	fields := []zapcore.Field{}
+	for k, v := range source {
+		fields = append(fields, zap.Any(k, v))
+	}
+	return fields
+}
+
+func Info(message string, fileds ...zap.Field) {
+	zlog.Info(message, fileds...)
+}
+
+func Debug(message string, fileds ...zap.Field) {
+	zlog.Debug(message, fileds...)
+}
+
+func Error(message string, fileds ...zap.Field) {
+	zlog.Error(message, fileds...)
+}
+
+func Warn(message string, fileds ...zap.Field) {
+	zlog.Warn(message, fileds...)
+}
+
+func Fatal(message string, fileds ...zap.Field) {
+	zlog.Fatal(message, fileds...)
+}
+
+func Panic(message string, fileds ...zap.Field) {
+	zlog.Panic(message, fileds...)
+}
+```
+
+เมื่อต้องการแสดง log ให้เรียกใช้ logger ที่สร้างขึ้นมา
+
+```go:cmd/main.go
+package main
+
+import (
+	"fmt"
+	"goapi/pkg/common/config"
+	"goapi/pkg/common/database"
+	"goapi/pkg/common/logger"
+)
+
+func main() {
+  logger.Info("Starting the service")
+	cfg, err := config.LoadConfig()
+	if err != nil {
+		panic(err)
+	}
+
+	db, closeDb, err := database.Init(cfg.Dsn)
+	if err != nil {
+		panic(err)
+	}
+	defer closeDb()
+	fmt.Println(db)
+
+	logger.Info("Database connected")
+}
+```
+
+## สร้าง HTTP Web Server ด้วย Fiber
+
+เมื่อเตรียมทุกอย่างพร้อมแล้ว ก็มาเริ่มสร้าง API กันได้เลย โดยจะใช้ Fiber V2 ในการสร้าง HTTP Web Server ขึ้นมา
+
+```bash
+go get [github.com/gofiber/fiber/v2](http://github.com/gofiber/fiber/v2)
+```
+
+สร้าง HTTP Web Server โดยให้เพิ่มที่ไฟล์ `cmd/main.go`
+
+```go:cmd/main.go
+package main
+
+import (
+	"fmt"
+	"goapi/pkg/common/config"
+	"goapi/pkg/common/database"
+	"goapi/pkg/common/logger"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+func main() {
+	// ... load config & init db
+
+	app := fiber.New()
+
+	app.Get("/", func(c *fiber.Ctx) error {
+		return c.SendString("Hello, World!")
+	})
+
+  logger.Info("The service is ready to listen and serve.")
+	app.Listen(fmt.Sprintf(":%v", cfg.Port))
+}
+```
+
+```bash
+go run cmd/main.go
+```
+
+เมื่อลองเปิด Browser ไปที่ [http://localhost:3000](http://localhost:3000) จะเห็นข้อความว่า `Hello World!` แสดงที่หน้าเวบ
+
+## การจัดการ Routes
+
+การจัดการ routes ใน fiber สำหรับทำ API จะมีอยู่ 5 เรื่องหลักๆ คือ
+
+- การ serve static files
+- การสร้าง routes
+- การ Grouping routes
+- การจัดการ Request
+- การตอบกลับ Response
+
+### การ serve static files
+
+เราสามารถใช้ `app.Static` เพื่อ serve static files เช่น โหลดรูปภาพที่อัพโหลดมา หรือโหลดไฟล์เอกสารต่างๆ เช่น ถ้าต้องการ serve static files ทุกอย่างที่เก็บไว้ใน directory ที่ชื่อ public มีวิธีการทำตามนี้
+
+```go
+app.Static("/", "./public")
+
+// => http://localhost:3000/doc.pdf
+// => http://localhost:3000/profile/user1.jpg
+```
+
+### การสร้าง routes
+
+การจะรับ request จาก client นั้น เราจะต้องสร้าง routes ขึ้นมาก่อน มีรูปแบบการสร้างง่ายๆ คือ ใช้ `app.Method("path", func(c *fiber.Ctx) error {})`
+
+ตามที่เราออกแบบไว้ จะสร้าง routes ได้ ดังนี้
+
+- Route สำหรับสร้างรายการใหม่
+
+```go
+app.Post("/api/v1/todos", func(c *fiber.Ctx) error {
+	return c.SendString("Create new Todo")
+})
+```
+
+- Route สำหรับเรียกดูรายการทั้งหมด
+
+```go
+app.Get("/api/v1/todos", func(c *fiber.Ctx) error {
+	return c.SendString("List all Todo")
+})
+```
+
+- Route สำหรับเรียกดูรายการจาก id ที่ระบุมา
+
+```go
+app.Get("/api/v1/todos/:id", func(c *fiber.Ctx) error {
+	return c.SendString("Get Todo by Id")
+})
+```
+
+- Route สำหรับอัพเดทสถานะรายการจาก id ที่ระบุมา
+
+```go
+app.Patch("/api/v1/todos/:id", func(c *fiber.Ctx) error {
+	return c.SendString("Update Todo status by Id")
+})
+```
+
+- Route สำหรับลบรายการจาก id ที่ระบุมา
+
+```go
+app.Delete("/api/v1/todos/:id", func(c *fiber.Ctx) error {
+	return c.SendString("Delete Todo by Id")
+})
+```
+
+### การ Grouping routes
+
+เมื่อเรามี routes เยอะๆ และ endpoints ขึ้นต้นเหมือนๆ กัน เราสามารถจัดกลุ่มของ routes ที่มี endpoint ที่ขึ้นต้นเหมือนกันได้ โดยใช้ `app.Group`
+
+```go:cmd/main.go
+todo := app.Group("/api/v1/todos")
+
+todo.Post("/", func(c *fiber.Ctx) error {
+	return c.SendString("Create new Todo")
+})
+
+todo.Get("/", func(c *fiber.Ctx) error {
+	return c.SendString("List all Todo")
+})
+
+todo.Get("/:id", func(c *fiber.Ctx) error {
+	return c.SendString("Get Todo by Id")
+})
+
+todo.Patch("/:id", func(c *fiber.Ctx) error {
+	return c.SendString("Update Todo status by Id")
+})
+
+todo.Delete("/:id", func(c *fiber.Ctx) error {
+	return c.SendString("Delete Todo by Id")
+})
+```
+
+### การจัดการกับ HTTP Request
+
+เรื่องถัดมา คือ เราจะจัดการกับ request ที่เรียกเข้ามาได้อย่างไร ซึ่งถ้าดูจาก handler function ของ fiber นั้นจะมีแค่ `c *fiber.Ctx` ส่งมาให้เท่านั้น ดังนั้นเราจะมาดูว่าจะจัดการกับ HTTP Request จาก `c *fiber.Ctx` ได้อย่างไรบ้าง
+
+- **การอ่านค่าจาก Header** ใช้ `c.Get` ในการอ่านค่าออกมาจาก Header ที่ต้องการ
+
+```go
+app.Get("/", func(c *fiber.Ctx) error {
+  c.Get("Content-Type")       // "text/plain"
+  c.Get("CoNtEnT-TypE")       // "text/plain"
+  c.Get("something", "john")  // "john"
+  // ..
+})
+```
+
+- **การอ่านค่าจาก Body** Fiber สามารถอ่านค่า request body ออกมาได้เลยโดยใช้ `c.Body` แต่จะได้ค่าออกมาเป็น `[]byte` ซึ่งไม่สะดวกในการใช้งานต่อ ดังนั้นเราจะใช้ `c.BodyParser` แทน ในการ bind ค่าของ request body ไปเป็น struct ซึ่งตัว Fiber จะจัดการให้เองตาม content-type ที่ส่งมา
+
+| content-type                      | struct tag |
+| --------------------------------- | ---------- |
+| application/x-www-form-urlencoded | form       |
+| multipart/form-data               | form       |
+| application/json                  | json       |
+| application/xml                   | xml        |
+| text/xml                          | xml        |
+
+```go
+todo.Post("/", func(c *fiber.Ctx) error {
+	todoForm := struct {
+		Text string `json:"text"`
+	}{}
+	c.BodyParser(&todoForm) // "{"Text":"do something"}"
+
+	return c.SendString("Create new Todo")
+})
+
+todo.Patch("/:id", func(c *fiber.Ctx) error {
+	todoForm := struct {
+		Completed bool `json:"completed"`
+	}{}
+	c.BodyParser(&todoForm) // "{"Completed":true}"
+
+	return c.SendString("Update Todo status by Id")
+})
+```
+
+- **การอ่านค่าจาก Query String** จะใช้ `c.Query` ในการอ่านค่าออกมา ตัวอย่างการใช้งาน เช่น ถ้าต้องการให้ระบุเงื่อนไขในการเรียกดูข้อมูล เราจะใส่มากับ query string เราก็จะใช้ `c.Query` อ่านค่าออกมา และสามารถกำหนดค่า default ได้ ในกรณีที่ไม่มีค่าส่งมา และค่าที่อ่านออกมาได้จะเป็น `string` เท่านั้นนะ
+
+```go
+// GET http://lcoalhost:3000/api/v1/todos?completed=true
+
+app.Get("/", func(c *fiber.Ctx) error {
+  c.Query("completed")         // "true"
+  c.Query("page", "1")         // "1"
+  c.Query("limit", "10")       // "10"
+
+  // ...
+})
+```
+
+หรือจะใช้ `c.QueryParser` เพื่อ bind ค่าไปเป็น struct คู่กับ tag `query` แทนก็ได้
+
+```go
+// GET http://localhost:3000/api/v1/todos?completed=true
+
+todo.Get("/", func(c *fiber.Ctx) error {
+	filter := struct {
+		// เป็น pointer เพื่อไม่ส่งค่ามาจะให้เป็น nil เพื่อแสดงข้อมูลทั้งหมด
+		Completed *bool `query:"completed"`
+	}{}
+	c.QueryParser(&filter) // "{"Completed":(*bool)(true)}"
+
+	return c.SendString("List all Todo")
+})
+```
+
+- **การอ่านค่าจาก Path Param** จะใช้ `c.Param` และค่าที่ได้ออกมาจะเป็น `string` เท่านั้น โดยชื่อ key จะใช้ชื่อเดียวกับที่ระบุไว้ใน url เช่น `/api/v1/todos/:id` ชื่อ key คือ `id`
+
+```go
+// GET http://localhost:3000/api/v1/todos/1
+
+todo.Get("/:id", func(c *fiber.Ctx) error {
+	id := c.Params("id")
+
+	fmt.Printf("ID: %v", id) // ID: 1
+
+	return c.SendString("Get Todo by Id")
+})
+```
+
+ซึ่งถ้าค่าเป็น integer สามารถใช้ `c.ParamInt` แปลงค่าให้ได้เลย
+
+```go
+// GET http://localhost:3000/api/v1/todos/123
+
+todo.Patch("/:id", func(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id") // int 123 and no error
+
+	// ...
+})
+```
+
+หรือจะใช้ c.ParamParser แปลงไปเป็น struct คู่กับ tag `params`
+
+```go
+// GET http://localhost:3000/api/v1/todos/1
+
+todo.Delete("/:id", func(c *fiber.Ctx) error {
+	param := struct {
+		ID uint `params:"id"`
+	}{}
+
+	c.ParamsParser(&param) // "{"id": 111}"
+
+	return c.SendString("Delete Todo by Id")
+})
+```
+
+### การจัดการกับ HTTP Response
+
+การตอบ Response กลับไป ก็ทำได้ผ่าน `c *fiber.Ctx` เช่นกัน
+
+- **ตอบกลับทาง Header** เราสามารถระบุ Response Header ได้ โดยใช้ `c.Set` เช่น
+
+```go
+app.Get("/", func(c *fiber.Ctx) error {
+  c.Set("X-Request-Id", "12345")
+  // => "X-Request-Id: 12345
+
+  // ...
+})
+```
+
+- **ตอบกลับด้วยข้อความ** ใช้ `c.SendString` ตัวอย่าง
+
+```go
+app.Get("/", func(c *fiber.Ctx) error {
+  return c.SendString("Hello, World!")
+  // => "Hello, World!"
+})
+```
+
+- **ตอบกลับด้วยไฟล์** ใช้ `c.SendFile` ตัวอย่าง
+
+```go
+app.Get("/not-found", func(c *fiber.Ctx) error {
+  return c.SendFile("./public/404.html");
+
+  // Disable compression
+  return c.SendFile("./public/index.html", false);
+})
+```
+
+- **ตอบกลับด้วย JSON** ส่วนใหญ่ใน API เรานิยมตอบกลับในรูปแบบของ JSON ใน Fiber ทำได้ง่ายๆ โดยใช้ `c.JSON` ซึ่งสามารถส่งได้ทั้ง `struct` และ `map[string]interface{}` และจะสร้าง Response Header `Content-Type: application/json` ให้อัตโนมัติ
+
+```go
+todo.Post("/", func(c *fiber.Ctx) error {
+	todoForm := struct {
+		Text string `json:"text"`
+	}{}
+	c.BodyParser(&todoForm) // "{"Text":"do something"}"
+
+	return c.JSON(todoForm)
+})
+```
+
+- **เปลี่ยน HTTP Status** ถ้าต้องการเปลี่ยน response status code เช่น ตอนการสร้างรายการใหม่สำเร็จให้ตอบกลับเป็น `201` แทน `200` ทำได้โดยใช้ `c.Status`
+
+```go
+todo.Post("/", func(c *fiber.Ctx) error {
+	newTodo := struct {
+		Text string `json:"text"`
+	}{}
+	c.BodyParser(&newTodo) // "{"Text":"do something"}"
+
+	return c.Status(201).JSON(newTodo)
+})
+```
+
+- **ตอบกลับด้วย HTTP Status อย่างเดียว** เช่น ตัว delete ข้อมูลสำเร็จ เราจะไม่ส่ง response body กลับไปด้วย มีแค่สถานะเท่านั้น ทำได้โดยใช้ `c.SendStatus`
+
+```go
+todo.Delete("/:id", func(c *fiber.Ctx) error {
+	// ...
+
+	return c.SendStatus(204)
+})
+
+// หรือใช้ทำ health check
+app.Get("/healthz", func(c *fiber.Ctx) error {
+  return c.SendStatus(200)
+})
+```
+
+- **การจัดการ Error**
+
+ในตัว Fiber นั้นถ้าเรา `return error` ออกไป Fiber จะส่ง response status code เป็น 500 และส่ง error message กลับมาให้
+
+```go
+// http://localhost:3000/api/v1/todos/123abc
+
+todo.Get("/:id", func(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id") // 1
+	if err != nil {
+		return err
+	}
+
+	return c.SendString(fmt.Sprintf("Get Todo by Id: %v", id))
+})
+
+// 500 strconv.Atoi: parsing "123abc": invalid syntax
+```
+
+แต่ถ้าเราต้องการเปลี่ยน response status code เช่น id ผิดรูปแบบให้ส่ง 400 กลับไป ทำได้โดยใช้ `fiber.NewError`
+
+```go
+// http://localhost:3000/api/v1/todos/123abc
+
+todo.Get("/:id", func(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id") // 1
+	if err != nil {
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	return c.SendString(fmt.Sprintf("Get Todo by Id: %v", id))
+})
+
+// 400 strconv.Atoi: parsing "123abc": invalid syntax
+```
+
+แต่เราควรตอบกลับ error ในรูปแบบของ JSON แทนจะดีกว่า
+
+```go
+// http://localhost:3000/api/v1/todos/123abc
+
+todo.Get("/:id", func(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id") // 1
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	return c.SendString(fmt.Sprintf("Get Todo by Id: %v", id))
+})
+
+//{
+//  "message": "strconv.Atoi: parsing \"123abc\": invalid syntax"
+//}
+```
+
+## สร้าง TodoHandler
+
+จากโค้ดด้านบนจะเห็นว่า router handler จะเขียนรวมอยู่ในไฟล์ `cmd/main.go` ซึ่งถ้าต่อไปเราว่า routes เพิ่มขึ้นมาอีก ก็จะทำให้ main ของเรายาวเกินไป เราควรออกส่วน handler นี้ออกมาไว้อีกไฟล์แทน
+
+แต่ก่อนอื่นเรามาดูกันก่อนว่าใรแต่ละ handlers นั้นต้องทำอะไรบ้าง
+
+1. **HTTP Handler** จะเป็นการติดต่อกับผู้ใช้ ในการรับ Request และตอบ Response กลับไป
+2. **Bussiness Logic** ในแต่ละ hander จะ logic การทำงานที่แตกต่างกันออกไป
+3. **Data Access** จะส่วนที่ทำหน้าที่ติดต่อกับฐานข้อมูล เพื่อ เรียกดู, บันทึก, แก้ไข หรือลบข้อมูล
+
+<div className="flex justify-center">
+  <div>![API](/static/images/go/fiber/api.png)</div>
+</div>
+
+ดังนั้นถ้าจะสร้าง TodoHandler จะต้องมี database connection เป็น dependency ด้วย โดยให้สร้างไฟล์ใหม่ `pkg/handlers/todo.go` ขึ้นมา
+
+```go:pkg/handlers/todo.go
+package handlers
+
+import "github.com/uptrace/bun"
+
+type todoHandler struct {
+	db *bun.DB
+}
+
+func NewTodoHandler(db *bun.DB) *todoHandler {
+	return &todoHandler{db}
+}
+```
+
+### 1. HTTP Handler
+
+เราจะย้ายโค้ดส่วนของ handler function (`func(c *fiber.Ctx) error`) ของทุก routes ออกมาไว้ที่นี่
+
+```go:pkg/handlers/todo.go
+func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
+	todoForm := struct {
+		Text string `json:"text"`
+	}{}
+	c.BodyParser(&todoForm) // "{"Text":"do something"}"
+
+	return c.Status(201).JSON(todoForm)
+}
+
+func (h todoHandler) ListTodo(c *fiber.Ctx) error {
+	filter := struct {
+		// เป็น pointer เพื่อไม่ส่งค่ามาจะให้เป็น nil เพื่อแสดงข้อมูลทั้งหมด
+		Completed *bool `query:"completed"`
+	}{}
+	c.QueryParser(&filter) // "{"Completed":<nil>}"
+
+	return c.SendString("List all Todo")
+}
+
+func (h todoHandler) GetTodo(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id") // 1
+	if err != nil {
+		// return err
+		return fiber.NewError(fiber.StatusBadRequest, err.Error())
+	}
+
+	return c.SendString(fmt.Sprintf("Get Todo by Id: %v", id))
+}
+
+func (h todoHandler) UpdateTodoStatus(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id") // 1
+	if err != nil {
+		return err
+	}
+	fmt.Printf("ID: %v", id)
+
+	todoForm := struct {
+		Completed bool `json:"completed"`
+	}{}
+	c.BodyParser(&todoForm) // "{"Completed":true}"
+
+	return c.JSON(todoForm)
+}
+
+func (h todoHandler) DeleteTodo(c *fiber.Ctx) error {
+	param := struct {
+		ID uint `params:"id"`
+	}{}
+
+	c.ParamsParser(&param) // "{"id": 111}"
+
+	return c.SendStatus(204)
+}
+```
+
+ถัดมาจะย้ายโค้ดในส่วนของการ register routes มาไว้ที่ `pkg/handlers/handlers.go`
+
+```go:pkg/handlers/handlers.go
+package handlers
+
+import (
+	"github.com/gofiber/fiber/v2"
+	"github.com/uptrace/bun"
+)
+
+func RegisterRoutes(app *fiber.App, db *bun.DB) {
+	app.Get("/healthz", func(c *fiber.Ctx) error {
+		return c.SendStatus(200)
+	})
+
+	api := app.Group("/api") // /api
+	v1 := api.Group("/v1")   // /api/v1
+
+	todoH := NewTodoHandler(db)
+	todo := v1.Group("/todos")  // /api/v1/todos
+	todo.Post("/", todoH.CreateTodo)
+	todo.Get("/", todoH.ListTodo)
+	todo.Get("/:id", todoH.GetTodo)
+	todo.Patch("/:id", todoH.UpdateTodoStatus)
+	todo.Delete("/:id", todoH.DeleteTodo)
+}
+```
+
+ส่วนใน main จะเหลือแค่เรียกใช้ `RegisterRoutes`
+
+```go:cmd/main.go
+func main() {
+	// ...
+
+	app := fiber.New()
+
+	handlers.RegisterRoutes(app, db)
+
+	app.Listen(fmt.Sprintf(":%v", cfg.Port))
+}
+```
+
+### 2. ใส่ Business Logic
+
+ในแต่ละ handler จะต้องมี business logic ที่เป็นเงื่อนไขการทำงานของแต่ละ handler แตกต่างกันไป แต่จะมีขั้นตอนทำงานคล้ายๆ กัน คือ
+
+1. ตรวจสอบ request ที่ส่งเข้ามา ถ้าไม่ถูกต้องให้ส่ง error กลับไป
+2. เรียกใช้ฐานข้อมูล เช่น บันทึกรายการใหม่ หรือค้นหาตามเงื่อนที่ส่งเข้ามา ถ้าเกิดข้อผิดพลาดก็ให้ส่ง error กลับไป
+3. ถ้าทุกอย่างทำงานสำเร็จ ให้ตอบ response ที่สำเร็จกลับไป
+
+```go:pkg/handlers/todo.go
+func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
+	todoForm := struct {
+		Text string `json:"text"`
+	}{}
+	err := c.BodyParser(&todoForm)
+	// 1. validate request body
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	if len(todoForm.Text) == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message":"text is required",
+		})
+	}
+
+	// 2. insert to database
+	// TODO: insert to database
+	todo := models.Todo{Title: todoForm.Text}
+	err = nil
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// 3. response result
+	return c.Status(201).JSON(todo)
+}
+
+func (h todoHandler) ListTodo(c *fiber.Ctx) error {
+	filter := struct {
+		// เป็น pointer เพื่อไม่ส่งค่ามาจะให้เป็น nil เพื่อแสดงข้อมูลทั้งหมด
+		Completed *bool `query:"completed"`
+	}{}
+	err := c.QueryParser(&filter)
+
+	// 1. validate request body
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// 2. select from database
+	// TODO: select from database
+	todos, err := []models.Todo{}, nil
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// 3. response result
+	return c.JSON(todos)
+}
+
+func (h todoHandler) GetTodo(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	// 1. validate request body
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// 2. select from database by id
+	// TODO: select from database by id
+	todo, err := models.Todo{ID: id}, nil
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// 3. response result
+	return c.JSON(todo)
+}
+
+func (h todoHandler) UpdateTodoStatus(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	// 1. validate request body
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+	todoForm := struct {
+		Completed bool `json:"completed"`
+	}{}
+	err = c.BodyParser(&todoForm)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// 2. update to database by id
+	// TODO: update to database by id
+	todo, err := models.Todo{ID: id, IsDone: updateTodo.Completed}, nil
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// 3. response result
+	return c.JSON(todo)
+}
+
+func (h todoHandler) DeleteTodo(c *fiber.Ctx) error {
+	id, err := c.ParamsInt("id")
+	// 1. validate request body
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// 2. delete from to database by id
+	// TODO: delete from database by id
+	fmt.Println(id)
+	err = nil
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// 3. response result
+	return c.SendStatus(204)
+}
+```
+
+### 3. Data Access
+
+หน้าสุดท้าย คือ ติดต่อกับฐานข้อมูล เพื่อเรียกดู, บันทึก, แก้ไข หรือลบข้อมูล
+
+- บันทึกข้อมูล
+
+```go:pkg/handlers/todo.go
+func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
+	// ...
+
+	// 2. insert to database
+	todo := models.Todo{Title: todoForm.Text}
+	_, err = h.db.NewInsert().Model(&todo).Exec(c.UserContext())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// ...
+}
+```
+
+- เรียกดูข้อมูลทั้งหมด
+
+```go:pkg/handlers/todo.go
+func (h todoHandler) ListTodo(c *fiber.Ctx) error {
+	// ...
+
+	// 2. select from database
+	todos := []models.Todo{}
+	q := h.db.NewSelect().Model(&todos)
+	if filter.Completed != nil {
+		q.Where("is_done = ?", *filter.Completed)
+	}
+	err = q.Scan(c.UserContext())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// ...
+}
+```
+
+- เรียกดูข้อมูลแบบระบุ ID
+
+```go:pkg/handlers/todo.go
+func (h todoHandler) GetTodo(c *fiber.Ctx) error {
+	// ..
+
+	// 2. select from database by id
+	todo := models.Todo{ID: id}
+	err = h.db.NewSelect().Model(&todo).WherePK().Scan(c.UserContext())
+	if err != nil {
+		if err.Error() == sql.ErrNoRows.Error() {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"message": "todo with given id not found",
+			})
+		}
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// ..
+}
+```
+
+- อัพเดทสถานะ
+
+```go:pkg/handlers/todo.go
+func (h todoHandler) UpdateTodoStatus(c *fiber.Ctx) error {
+	// ...
+
+	// 2. update to database by id
+	todo := models.Todo{ID: id, IsDone: updateTodo.Completed}
+	res, err := h.db.NewUpdate().
+		Model(&todo).
+		Column("is_done").
+    SetColumn("updated_at", "DEFAULT").
+		WherePK().
+		Returning("*").
+		Exec(c.UserContext())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"message": "todo with given id not found",
+			})
+	}
+
+	// ...
+}
+```
+
+- ลบข้อมูลข้อมูล
+
+```go:pkg/handlers/todo.go
+func (h todoHandler) DeleteTodo(c *fiber.Ctx) error {
+	// ...
+
+	// 2. delete from to database by id
+	res, err := h.db.NewDelete().
+		Model((*models.Todo)(nil)).
+		Where("id = ?", id).
+		Exec(c.UserContext())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"message": "todo with given id not found",
+		})
+	}
+
+	// ...
+}
+```
+
+## DTO และการทำ Validation
+
+Data Transfer Objects หรือ DTO นั่นเป็น struct ของโครงสร้างข้อมูลที่ใช้ในการรับส่งข้อมูลกันระหว่าง client กับ server
+
+<div className="flex justify-center">
+  <div>![DTO](/static/images/go/fiber/dto.png)</div>
+</div>
+
+ซึ่งเราจะใช้เป็น struct ที่ใช้ในการ bind ค่าจาก request body นั่นเอง แต่จากโค้ดด้านบน struct ที่ใช้ bind request body จะเขียนใส่เอาไว้ใน handlers แต่ละ ซึ่งโค้ดตรงนี้เราสามารถแยกออกมาเป็นอีกไฟล์ได้
+
+เริ่มจากสร้างไฟล์ `pkg/dtos/todo.go`
+
+```go:pkg/dtos/todo.go
+package dtos
+
+type CreateTodoForm struct {
+	Text string `json:"text"`
+}
+
+type UpdateTodoForm struct {
+	Completed bool `json:"completed"`
+}
+```
+
+เรียกใช้ใน TodoHandler
+
+```go:pkg/handlers/todo.go
+func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
+	todoForm := dtos.CreateTodoForm{}
+	err := c.BodyParser(&todoForm)
+	// 1. validate request body
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+  // ...
+}
+
+func (h todoHandler) UpdateTodoStatus(c *fiber.Ctx) error {
+	// ...
+
+	updateTodo := dtos.UpdateTodoForm{}
+	err = c.BodyParser(&updateTodo)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
+	// ...
+}
+```
+
+### เพิ่มเรื่องการทำ Validation
+
+เมื่อเราใช้ DTO เราสามารถเพิ่มเงื่อนไขในการตัวสอบข้อมูลเข้าไปใน DTO ได้เลย โดยใส่ tag `validate` เข้าไป และใช้ [validator](https://github.com/go-playground/validator) มาช่วยในการตรวจสอบ struct จาก tag ที่ระบุไว้
+
+```go:pkg/dtos/todo.go
+package dtos
+
+type CreateTodoForm struct {
+	Text string `json:"text" validate:"required"`
+}
+
+type UpdateTodoForm struct {
+	Completed bool `json:"completed" validate:"required"`
+}
+```
+
+แก้ใน TodoHandler ให้มาเรียกใช้งาน DTO
+
+สร้างไฟล์ `pkg/common/validator/validator.go` สำหรับเป็นตัวช่วยในการตรวจสอบ struct ว่ามี fields ไหนบ้างที่ไม่ผ่านการตรวจสอบ
+
+```go:pkg/common/validator/validator.go
+package validator
+
+import "github.com/go-playground/validator/v10"
+
+// use a single instance , it caches struct info
+var validate *validator.Validate
+
+func init() {
+	validate = validator.New()
+}
+
+type ErrorResponse struct {
+	FailedField string `json:"failed_field"`
+	Tag         string `json:"tag"`
+	Value       string `json:"value"`
+}
+
+func ValidateStruct(s interface{}) []*ErrorResponse {
+	var errors []*ErrorResponse
+	err := validate.Struct(s)
+	if err != nil {
+		for _, err := range err.(validator.ValidationErrors) {
+			var element ErrorResponse
+			element.FailedField = err.StructNamespace()
+			element.Tag = err.Tag()
+			element.Value = err.Param()
+			errors = append(errors, &element)
+		}
+	}
+	return errors
+}
+```
+
+การใช้งานใน TodoHandler
+
+```go:pkg/handlers/todo.go
+func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
+	// ...
+
+	// if len(todoForm.Text) == 0 {
+	// 	return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+	//		"message":"text is required",
+	//	})
+	// }
+
+	errors := validator.ValidateStruct(&todoForm)
+	if errors != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"message": "invalidate JSON",
+			"errors":  errors,
+		})
+	}
+
+	// ...
+}
+```
+
+### สร้าง DTO สำหรับ Response
+
+จากโค้ด ในการส่ง JSON Response กลับไป เราจะใช้ model ส่งไปกลับไปตรงๆ เลย
+
+```json
+{
+  "ID": 1,
+  "Title": "do something",
+  "IsDone": false,
+  "CreatedAt": "2022-09-15T09:40:12.981316Z",
+  "UpdatedAt": "2022-09-15T09:40:12.981316Z"
+}
+```
+
+แต่โครงสร้าง JSON ที่ต้องการเป็นแบบนี้
+
+```json
+{
+  "id": 1,
+  "text": "do something",
+  "completed": false
+}
+```
+
+ซึ่งเราสามารถเพิ่ม tag json ลงไป model ก็จะได้ JSON แบบที่เราต้องแล้ว
+
+```go
+package models
+
+import "time"
+
+type Todo struct {
+	ID     int    `json:"id" bun:"id,pk,autoincrement"`
+	Title  string `json:"text" bun:"title,nullzero,notnull"`
+	IsDone bool   `json:"completed" bun:"is_done,notnull,default:false"`
+
+	CreatedAt time.Time `json:"-" bun:",nullzero,notnull,default:current_timestamp"`
+	UpdatedAt time.Time `json:"-" bun:",nullzero,notnull,default:current_timestamp"`
+}
+```
+
+แต่เราควรแยกหน้าที่นี้ให้เป็นของ DTO โดยการสร้าง DTO สำหรับการ Response ขึ้น แล้วส่งไปกลับให้ client
+
+```go:pkg/dtos/todo.go
+type TodoResponse struct {
+	ID        int    `json:"id"`
+	Text      string `json:"text"`
+	Completed bool   `json:"completed"`
+}
+```
+
+```go:pkg/handlers/todo.go
+func (h todoHandler) GetTodo(c *fiber.Ctx) error {
+	// ..
+
+	// 2. select from database by id
+	// ...
+
+  serialized := dtos.TodoResponse{
+		ID:        todo.ID,
+		Text:      todo.Title,
+		Completed: todo.IsDone,
+	}
+
+	// 3. response result
+	return c.JSON(serialized)
+}
+```
+
+### สร้าง Mapper
+
+เนื่องจากในโค้ดของ handler เราจะมีการแปลง dto → model และ model → dto กันไปมา ซึ่งทำให้โค้ดเราดูรกไปหน่อย เราจะมาสร้าง mapper เป็นตัวกลางค่อย แปลง dto → model และ model → dto กัน
+
+<div className="flex justify-center">
+  <div>![Mapper](/static/images/go/fiber/mapper.png)</div>
+</div>
+
+สร้างไฟล์ `pkg/mapper/todo.go`
+
+```go:pkg/mapper/todo.go
+package mapper
+
+import (
+	"goapi/pkg/dtos"
+	"goapi/pkg/models"
+)
+
+func CreateTodoFormToModel(dto dtos.NewTodoForm) *models.Todo {
+	return &models.Todo{
+		Title: dto.Text,
+	}
+}
+
+func TodoToDto(m *models.Todo) *dtos.TodoResponse {
+	return &dtos.TodoResponse{
+		ID:        m.ID,
+		Text:      m.Title,
+		Completed: m.IsDone,
+	}
+}
+
+func TodosToDto(todos []*models.Todo) []*dtos.TodoResponse {
+	dtos := make([]*dtos.TodoResponse, len(todos))
+	for i, t := range todos {
+		dtos[i] = TodoToDto(t)
+	}
+
+	return dtos
+}
+```
+
+แก้ไขใน TodoHandler ให้มาใช้งาน mapper
+
+```diff:pkg/handlers/todo.go
+func (h todoHandler) CreateTodo(c *fiber.Ctx) error {
+	// ...
+
+	// 2. insert to database
+- todo := models.Todo{Title: todoForm.Text}
++	todo := mapper.CreateTodoFormToModel(&todoForm)
+	_, err = h.db.NewInsert().Model(todo).Exec(c.UserContext())
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"message": err.Error(),
+		})
+	}
+
++	serialized := mapper.TodoToDto(todo)
+
+	// 3. response result
+- return c.Status(201).JSON(todo)
++	return c.Status(201).JSON(serialized)
+}
+```
+
+## Middleware
+
+Middleware คือ function ที่เอามาครอบ handler ของเรา โดยจะทำงานก่อนส่งเข้า handler และหลัง handler ทำงานเสร็จ และสามารถใส่ middleware หลายตัวมาวางซ้อนกันได้ ตัวอย่างการใช้งาน เช่น การทำ logging ของแต่ละ retquest หรือจัดการ CORS
+
+<div className="flex justify-center">
+  <div>![Middleware](/static/images/go/fiber/mwd.png)</div>
+</div>
+
+### การใช้งาน Middleware
+
+ใน Fiber จะมี middlewere ที่จำเป็นต้องใช้ง่ายบ่อยๆ เตรียมไว้ให้แล้ว เช่น
+
+- **CORS** เป็น middleware สำหรับจัดการ [Cross-Origin Resource Sharing](https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS)
+
+```go
+import (
+  "github.com/gofiber/fiber/v2"
+  "github.com/gofiber/fiber/v2/middleware/cors"
+)
+
+// Default config
+app.Use(cors.New())
+
+// Or extend your config for customization
+app.Use(cors.New(cors.Config{
+    AllowOrigins: "https://gofiber.io, https://gofiber.net",
+    AllowHeaders:  "Origin, Content-Type, Accept",
+}))
+```
+
+- **RequestID** เป็น middleware เอาไว้สร้าง indentifier แล้วส่งกลับไปใน Response Header
+
+```go
+import (
+  "github.com/gofiber/fiber/v2"
+  "github.com/gofiber/fiber/v2/middleware/requestid"
+)
+
+// Default middleware config
+app.Use(requestid.New())
+
+// Or extend your config for customization
+app.Use(requestid.New(requestid.Config{
+    Header:    "X-Custom-Header",
+    Generator: func() string {
+        return "static-id"
+    },
+}))
+```
+
+- **Logger** เป็น middleware เอา log รายละเอียดของ HTTP request/response
+
+```go
+import (
+    "github.com/gofiber/fiber/v2"
+    "github.com/gofiber/fiber/v2/middleware/logger"
+)
+
+// Default middleware config
+app.Use(logger.New())
+
+// ใช้ร่วมกับ Request ID
+app.Use(requestid.New())
+
+app.Use(logger.New(logger.Config{
+    // For more options, see the Config section
+  Format: "${pid} ${locals:requestid} ${status} - ${method} ${path}\n",
+}))
+```
+
+- **Recover** เป็น middleware ที่เอาทำ recovers เมื่อเกิด panics ในตำแหน่งต่างๆ ของโปรแกรม
+
+```go
+import (
+  "github.com/gofiber/fiber/v2"
+  "github.com/gofiber/fiber/v2/middleware/recover"
+)
+
+// Default middleware config
+app.Use(recover.New())
+
+// This panic will be catch by the middleware
+app.Get("/", func(c *fiber.Ctx) error {
+    panic("I'm an error")
+})
+```
+
+**วิธีการใช้งาน** เราจะเอา middlewere มาใส่ใน main ก่อนที่จะทำการ register routes
+
+```go:cmd/main.go
+func main() {
+	// ...
+
+	app := fiber.New()
+
+	// use middlewere
+	app.Use(cors.New())
+	app.Use(requestid.New())
+	app.Use(recover.New())
+	app.Use(logger.New())
+
+	handlers.RegisterRoutes(app, db)
+
+	app.Listen(fmt.Sprintf(":%v", cfg.Port))
+}
+```
+
+### การสร้าง Middlewere ขึ้นมาใช้งานเอง
+
+วิธีการสร้าง middleware จะเหมือนกับ handler function `func(c *fiber.Context) error` เพียงแต่จะมีการเรียก [c.Next](http://c.Next) เพิ่มเข้ามา เพื่อบอกให้ไปทำงานในใน handler ตัวถัดไป และเมื่อ handler นั้นทำงานเสร็จ จะกลับมาทำงานต่อใน middleware
+
+```go
+func MyMiddleware(c *fiber.Ctx}) error {
+	c.Next()
+}
+```
+
+ซึ่งสามารถเอามาประยุกต์ใช้ในการทำ access log หรือการทำ authentication ก็ได้
+
+- ตัวอย่างการทำ Access log เพื่อให้แสดงข้อมูลที่เราต้องการออกมา โดยให้สร้างไฟล์ `pkg/middlewares/logger.go`
+
+```go:pkg/middlewares/logger.go
+package middlewares
+
+import (
+	"goapi/pkg/common/logger"
+	"os"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+func Logger(c *fiber.Ctx) error {
+	start := time.Now()
+
+	appName := os.Getenv("APP_NAME")
+
+	if len(appName) == 0 {
+		appName = "goapi"
+	}
+
+	fileds := map[string]interface{}{
+		"app":       appName,
+		"domain":    c.Hostname(),
+		"requestId": c.GetRespHeader("X-Request-ID"),
+		"userAgent": c.Get("User-Agent"),
+		"ip":        c.IP(),
+		"method":    c.Method(),
+		"uri":       c.Path(),
+	}
+
+	log := logger.WithFields(fileds)
+
+	c.Locals("log", log) // ส่งต่อ log ที่มี fileds ข้างบนไปให้ handler ใช้งาน
+
+	err := c.Next()
+
+	fileds["status"] = c.Response().StatusCode()
+	fileds["latency"] = time.Since(start)
+
+	logger.Info("access log", logger.ToFields(fileds)...)
+
+	return err
+}
+```
+
+วิธีการเรียกใช้งาน
+
+```diff:cmd/main.go
+func main() {
+	// ...
+
+	app := fiber.New()
+
+	// use middlewere
+	app.Use(cors.New())
+	app.Use(requestid.New())
+	app.Use(recover.New())
+-	app.Use(logger.New())
++ app.Use(middlewares.Logger)
+
+	handlers.RegisterRoutes(app, db)
+
+	app.Listen(fmt.Sprintf(":%v", cfg.Port))
+}
+```
+
+## Non Functional Requirements
+
+ในการทำ API Service นอกจากการทำตาม requirements แล้วนั้น ยังมีเรื่องอื่นๆ ที่ควรเพิ่มเข้ามา ก่อนที่จะนำไป deploy ให้งานจริงได้ เช่น
+
+### ควรกำหนด Rate Limit
+
+ในบางครั้ง api ของเราจะต้องใช้เวลาในการทำงานนาน ไม่ว่าจะเป็นคิวรี่ข้อมูล หรือไปเรียกใช้งาน api ภายนอก เราจะต้องป้องกัน api ของเราด้วยการกำหนดจำนวนสูงในการรับ request ต่อวินาทีเอาไว้ [ดูเพิ่มเติม](https://somprasongd.work/blog/go/golang-api-p3-ratelimit)
+
+### ต้องมี **Graceful Shutdown**
+
+เราต้องรอให้งานที่กำลังทำงานค้างอยู่นั้น ทำงานให้เสร็จก่อน ถึงจะ shutdown ระบบไป [ดูเพิ่มเติม](https://somprasongd.work/blog/go/golang-api-p4-graceful-shutdown)
+
+### รองรับ Liveness Probe กับ Readiness Probe
+
+ถ้า API ของเราต้องนำไป Deploy บน K8S มีอีก 2 เรื่องที่ต้องทำ คือ Liveness Probe กับ Readiness Probe [ดูเพิ่มเติม](https://somprasongd.work/blog/architecture/liveness-readiness-probe)
+
+### การทำ API Document
+
+API Document จะเป็นตัวบอกว่าว่า API ของเราทำงานยังไง มีการรับ Resquest แบบ มี Response หน้าตาเป็นยังไง [ดูเพิ่มเติม](https://somprasongd.work/blog/go/golang-api-p10-doc)
+
+## Deployment
+
+เมื่อ API ของเราเสร็จแล้ว จะต้องนำไป deploy เพื่อใช้งานจริง โดยจะใช้วิธีสร้างเป็น Docker Image เพื่อนำไป deploy ใน Docker หรือ Kubernetes
+
+ในบทความนี้ จะใช้ docker-compose
+
+### Dockerfile
+
+เริ่มจากสร้าง Dockerfile เพื่อนำไปสร้าง Docker image
+
+```docker
+FROM golang:1.19-buster AS build
+WORKDIR /app
+COPY go.mod ./
+COPY go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY pkg ./pkg
+ENV GOARCH=amd64
+RUN go build -o /go/bin/app cmd/main.go
+
+# Deploy
+FROM gcr.io/distroless/base-debian11
+COPY --from=build /go/bin/app /app
+EXPOSE 3000
+USER nonroot:nonroot
+CMD ["/app"]
+```
+
+### Build Docker Image
+
+สร้าง docker image ด้วยคำสั่ง `docker build -t todo-api:1.0.0 -f Dockerfile .`
+
+### Run with Docker-compose
+
+หลังจากได้ docker image มาแล้ว เมื่อจะนำไป deploy ใน docker จะใช้รันผ่าน docker-compose ซึ่งจำต้องสร้าง `docker-compose.yml` ขึ้นมาดังนี้
+
+```yaml
+version: '3.8'
+services:
+  db:
+    image: postgres:14-alpine
+    container_name: todo-db
+    restart: always
+    environment:
+      - TZ=Asia/Bangkok
+      - PGTZ=Asia/Bangkok
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=mysecretpassword
+      - POSTGRES_DB=todo-db
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    logging:
+      options:
+        max-size: 10m
+        max-file: '3'
+    healthcheck:
+      test: pg_isready -U postgres -h 127.0.0.1
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  migrate:
+    image: migrate/migrate
+    volumes:
+      - ./migrations:/migrations
+    command: -verbose -path=/migrations/ -database postgres://postgres:mysecretpassword@db:5432/todo-db?sslmode=disable up
+    depends_on:
+      db:
+        condition: service_healthy
+
+  api:
+    build: .
+    image: todo-api:1.0.0
+    container_name: todo-api
+    restart: always
+    ports:
+      - 3000:3000
+    environment:
+      - TZ=Asia/Bangkok
+      - APP_MODE=production
+      - DSN=postgres://postgres:mysecretpassword@db:5432/todo-db?sslmode=disable
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+volumes:
+  pg_data:
+```
+
+และรันด้วยคำสั่ง `docker-compose up -d`
+
+---
+
+จบแล้วสำหรับการสร้าง CRUD API Service ในภาษา Go โดยใช้ Fiber กับ Bun ORM ตั้งแต่เริ่มต้นว่ามีเรื่องอะไรที่ต้องทำบ้างทั้ง functional และ non-functional จนไปถึงการ Deploy เพื่อใช้งานจริง
+
+source code ดูได้จาก [ที่นี่](https://github.com/somprasongd/blog-code/tree/main/golang/goapi-fiber-bun)

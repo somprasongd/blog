@@ -1,0 +1,343 @@
+---
+title: 'How to Set Up a Node.js Project with TypeScript 2022'
+date: '2022-07-22'
+tags: ['nodejs', 'typescript', 'eslint']
+draft: false
+summary: 'วิธีการตั้งค่า Node.js โปรเจคให้สามารถรัน TypeScript ได้ พร้อมกับวิธีการนำไปใช้กับ Express อัพเดทปี 2022'
+---
+
+# How to Set Up a Node.js Project with TypeScript 2022
+
+วิธีการตั้งค่า Node.js โปรเจคให้สามารถรัน TypeScript ได้ พร้อมกับวิธีการนำไปใช้กับ Express อัพเดทปี 2022
+
+## สิ่งที่ต้องมี
+
+- Node.js version 16
+- npm หรือ yarn
+- VS Code
+
+## การตั้งค่าโปรเจคให้สามารถรัน TypeScript ได้
+
+- เริ่มจากสร้างโปรเจคใหม่ และสร้างไฟล์ package.json
+
+```bash
+mkdir typescript-node
+cd typescript-node
+npm init -y
+```
+
+- ติดตั้ง libraries ใน devDepencies
+  - `typescript` เป็นตัวหลักที่ช่วยแปลงจาก TypeScript ไปเป็น JavaScript
+  - `ts-node` เป็นเหมือน dev server ค่อยช่วยแปลงโค้ดจาก TypeScript ไปเป็น JavaScript ในขั้นตอนพัฒนา
+  - `@tsconfig/node16` config สำหรับ Node.js Version 16
+  - `nodemon` ตัวช่วยให้รันโค้ดใหม่อัตโนมัติ เมื่อมีการแก้ไขโค้ด ทำงานร่วมกับ `ts-node`
+
+```bash
+npm i -D typescript ts-node @tsconfig/node16 nodemon
+```
+
+- สร้างไฟล์ tsconfig.json โดยใช้คำสั่ง
+
+```bash
+npx tsc --init
+```
+
+และแก้ไขค่าไฟล์ที่แนะนำของ[เวอร์ชัน 16](https://github.com/tsconfig/bases/blob/main/bases/node16.json) ตามนี้
+
+```json
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "display": "Node 16",
+  "extends": "@tsconfig/node16/tsconfig.json" /* ใช้ node 16 config */,
+
+  "compilerOptions": {
+    "lib": ["es2021"] /* กำหนดว่าตอนเขียนด้วย js version อะไร */,
+    "module": "commonjs" /* กำหนดว่าจะใช้ module แบบไหน commonjs หรือ esm*/,
+    "target": "es2021" /* กำหนดว่าให้ complie เป็น js version อะไร */,
+
+    "outDir": "./dist" /* ระบุโฟลเดอร์ output (JavaScript) */,
+    "rootDir": "./src" /* ระบุโฟลเดอร์ sourcecode (TypeScript) */,
+
+    "strict": true /* เปิดใช้ strict type-checking options*/,
+    "esModuleInterop": true /* อนุญาติให้ complie ES module เป็น commonjs*/,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "moduleResolution": "node"
+  }
+}
+```
+
+- แก้ไข script ไฟล์ package.json
+  - `dev` สำหรับรันโค้ดในโหมดพัฒนา จะทำการ reload อัตโนมัติเมื่อแก้ไขโค้ด
+  - `build` สำหรับแปลงไฟล์เป็น JavaScript สำหรับการนำไปใช้งานจริง
+
+```json
+"scripts": {
+  "dev": "nodemon",
+  "build": "tsc --project ./"
+  "prod": "npm run build && node dist/index.js"
+},
+
+```
+
+- และสร้างไฟล์ nodemon.json
+
+```json
+{
+  "watch": ["src"],
+  "ext": "ts",
+  "ignore": ["src/**/*.spec.ts"],
+  "exec": "ts-node ./src/index.ts"
+}
+```
+
+## ทดสอบโค้ด TypeScript
+
+- สร้างไฟล์ src/index.ts
+
+```tsx
+const geeting = (name: string) => {
+  console.log(`Hello ${name} from TypeScript.`)
+}
+
+geeting('Ball')
+```
+
+- รัน `npm run dev`
+
+```bash
+> typescript-node@1.0.0 dev D:\workspaces\playgounds\typescript-node
+> nodemon
+
+[nodemon] 2.0.7
+[nodemon] to restart at any time, enter `rs`
+[nodemon] watching path(s): src\**\*
+[nodemon] watching extensions: ts
+[nodemon] starting `ts-node ./src/index.ts`
+Hello Ball from TypeScript.
+[nodemon] clean exit - waiting for changes before restart
+
+```
+
+- ทดลองแก้ไขชื่อ ตัว `nodemon` ก็จะ restart ให้อัตโนมัติ
+
+```bash
+[nodemon] restarting due to changes...
+[nodemon] starting `ts-node ./src/index.ts`
+Hello Stamp from TypeScript.
+[nodemon] clean exit - waiting for changes before restart
+
+```
+
+- ทดสอบ build โดยรันคำสั่ง `npm run build` ก็ได้จะได้โฟลเดอร์ `dist` ออกมา และมีไฟล์ index.js อยู่ข้างใน
+
+```jsx
+// dist/index.js
+'use strict'
+const geeting = (name) => {
+  console.log(`Hello ${name} from TypeScript.`)
+}
+geeting('Stamp')
+```
+
+## วิธีตั้งค่า TypeScript กับ Express
+
+- ติดตั้ง Express รัน `npm i express`
+- สร้าง Express Server ง่ายๆ ที่ไฟล์ src/index.ts
+
+```tsx
+import express from 'express'
+
+const app = express()
+
+const PORT = 8000
+
+app.get('/', (req, res) => res.send('Express + TypeScript Server'))
+
+app.listen(PORT, () => {
+  console.log(`Server is running at http://localhost:${PORT}`)
+})
+```
+
+- ทดสอบรัน npm run dev จะพบว่าไม่สามารถรันได้ เนื่องจาก มันไม่รู้จัก type นั่นเอง
+- แก้ไขโดยการติดตั้ง @types ที่ต้องการเพิ่มเข้าไป
+
+```bash
+npm i -D @types/node @types/express
+```
+
+> ถ้าใช้ bodyParser ก็ต้องติดตั้ง @types/body-parser เพิ่มด้วย
+
+- เมื่อรองรันใหม่อีกครั้งก็จะสามารถรันได้แล้ว
+
+```bash
+npm run dev
+
+> typescript-node@1.0.0 dev D:\workspaces\playgounds\typescript-node
+> nodemon
+
+[nodemon] 2.0.7
+[nodemon] to restart at any time, enter `rs`
+[nodemon] watching path(s): src\**\*
+[nodemon] watching extensions: ts
+[nodemon] starting `ts-node ./src/index.ts`
+Server is running at http://localhost:8000
+```
+
+### ยังไม่หมด
+
+เนื่องจากเราเขียนแบบ TypeScript แต่โค้ดข้างต้นยังไม่ได้ถูกกำหนด type ให้ถูกต้องเลย ดังนั้นเรามากำหนด type ให้ถูกต้องการ ดังนี้
+
+- app ต้องมี type เป็น Application
+- req ต้องมี type เป็น Request
+- res ต้องมี type เป็น Response
+
+```tsx
+import express, { Application, Request, Response } from 'express'
+
+const app: Application = express()
+
+const PORT: number = 8000
+
+app.get('/', (req: Request, res: Response) => {
+  res.send('Express + TypeScript Server')
+})
+
+app.listen(PORT, () => {
+  console.log(`Server is running at http://localhost:${PORT}`)
+})
+```
+
+เท่านี้ก็เรียบร้อยแล้ว
+
+## Bonus Linting TypeScript with ESLint
+
+**เพิ่มการทำ linting ด้วย ESLint**
+
+- เริ่มจากติดตั้ง eslint และ plugin ที่จำเป็นต้องใช้
+
+```bash
+npm install eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin --save-dev
+```
+
+- สร้างไฟล์ `.eslintrc.js` และตั้งค่าตามนี้
+
+```jsx
+module.exports = {
+  parser: '@typescript-eslint/parser',
+  parserOptions: {
+    ecmaVersion: 'latest', // Allows the use of modern ECMAScript features
+    sourceType: 'module', // Allows for the use of imports
+  },
+  plugins: ['@typescript-eslint'],
+  env: {
+    node: true, // Enable Node.js global variables
+  },
+  extends: [
+    'eslint:recommended',
+    'plugin:@typescript-eslint/eslint-recommended',
+    'plugin:@typescript-eslint/recommended', // Uses the linting rules from @typescript-eslint/eslint-plugin
+  ],
+  rules: {
+    // https://eslint.org/docs/latest/rules/
+    'no-console': 1, // Means warning
+  },
+}
+```
+
+- เพิ่มไฟล์ `.eslintignore` โดยเราจะไม่สนใจ node_modules และ dist
+
+```
+node_modules
+dist
+```
+
+- แก้ไขไฟล์ package.json ให้รัน linting script
+
+```diff
+"scripts": {
+  "dev": "nodemon",
+  "build": "tsc --project ./"
+  "prod": "npm run build && node dist/index.js"
++ "lint": "eslint . --fix"
+},
+```
+
+**ใช้งาน Prettier ร่วมกับ ESLint**
+
+- ติดตั้ง plugin และ Prettier rules
+
+```bash
+npm install --save-dev eslint-config-prettier eslint-plugin-prettier
+```
+
+- เพิ่มใน `.eslintrc.js` ตามนี้
+
+```diff
+module.exports = {
+  parser: '@typescript-eslint/parser',
+  parserOptions: {
+    ecmaVersion: 'latest', // Allows the use of modern ECMAScript features
+    sourceType: 'module', // Allows for the use of imports
+  },
+  plugins: [
+		'@typescript-eslint',
++   'prettier'
+  ],
+  env: {
+    node: true, // Enable Node.js global variables
+  },
+  extends: [
+    'eslint:recommended',
+    'plugin:@typescript-eslint/eslint-recommended',
+    'plugin:@typescript-eslint/recommended', // Uses the linting rules from @typescript-eslint/eslint-plugin
++   'plugin:prettier/recommended',
+  ],
+  rules: {
+    'no-console': 1, // Means warning
++   'prettier/prettier': [
++     'error',
++     {
++       singleQuote: true,
++       parser: 'flow',
++     },
+    ],
+  },
+};
+```
+
+- กำหนด Prettier Rules โดยสร้างไฟล์ `.prettierrc`
+
+```jsx
+{
+  "useTabs": false,
+  "tabWidth": 2,
+  "singleQuote": true,
+  "printWidth": 120,
+  "trailingComma": "es5"
+}
+```
+
+จัด **format และ lint ทุกครั้งที่ save**
+
+เพิ่มการตั้งค่าให้จัด format และ lint ทุกครั้งที่ save โดยเพิ่มไฟล์ `.vscode/setting.json` ตามนี้
+
+```json
+{
+  "eslint.validate": ["javascript", "javascriptreact", "typescript", "typescriptreact"],
+  "editor.defaultFormatter": "esbenp.prettier-vscode",
+  "editor.formatOnPaste": true,
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnPaste": {
+    "source.fixAll.eslint": true
+  },
+  "editor.codeActionsOnSave": {
+    "source.fixAll.eslint": true
+  }
+}
+```
+
+อย่าลืมติดตั้ง Extensions ด้วยนะ
+
+- [ESLint](https://marketplace.visualstudio.com/items?itemName=dbaeumer.vscode-eslint)
+- [Prettier](https://marketplace.visualstudio.com/items?itemName=esbenp.prettier-vscode)

@@ -1,0 +1,416 @@
+---
+title: 'API Service with Go: API Testing'
+date: '2022-07-19'
+lastmod: '2022-07-20'
+tags: ['api', 'go', 'hexagonal', 'test']
+draft: false
+summary: 'การทดสอบ API สร้างตามหลักการของ Hexagonal Architecture'
+---
+
+# API Testing
+
+จากบทความเรื่องออกแบบ[โครงสร้างโปรเจค](https://somprasongd.work/blog/go/golang-api-p8-proj-structure) ในแต่ละโมดูลนั้นได้นำเอา[หลักการของ Hexagonal Architecture](https://somprasongd.work/blog/architecture/hexagonal) มาใช้ ซึ่งมีการแยกส่วนการทำงานที่เป็นอิสระต่อกัน ทำใช้เราสามารถเขียนทดสอบโปรแกรมของเราได้ง่ายขึ้นด้วย
+
+<div className="flex justify-center">
+  <div>![hex](/static/images/go/api-test/hex.png)</div>
+</div>
+
+## แล้วจะต้องทดสอบอะไรบ้าง
+
+การเขียนทดสอบในภาษา Go ดูได้จาก[ที่นี่](https://somprasongd.work/blog/go/golang-part3)
+
+### Unit Test
+
+1. Service เป็นส่วนของ business logic ของเรา ซึ่งการทำงานจริงของ service นั้นจะมีการต่อฐานข้อมูลจริงผ่าน Repository แต่ในการทำ unit test นั้นเราจะทำการ mock repository ขึ้นมาแทน
+2. Handler เป็นส่วนในการจัดการ request กับ response โดยจะทำการทดสอบว่าส่ง response ออกมาถูกต้องหรือไม่ ซึ่งจะสร้าง mock service ส่งเข้าไปแทน
+
+### Integration Test
+
+1. Service เราสามารถเขียนเหมือน unit test ได้เลย เพียงแค่เปลี่ยนจาก mock repository เป็น database repository ของจริง
+2. Handler เราสามารถเขียนเหมือน unit test ได้เลย เพียงแค่เปลี่ยนจาก mock service เป็น servce ของจริงแทน
+
+<aside>
+💡 แต่ในบทความนี้จะเขียนแต่ Unit Test เท่านั้น
+
+</aside>
+
+## แล้วจะ Mock ยังไง
+
+การสร้าง mock คือ การกำหนดข้อมูลที่ return กลับออกมาให้ตรงตามที่เราต้องการ ซึ่งเราจะใช้ [mock](http://github.com/stretchr/testify/mock) package ของ testify มาช่วยในการเขียน
+
+### วิธีการใช้งาน testify
+
+1. สร้าง mock struct
+
+- ติดตั้ง testify `go get github.com/stretchr/testify`
+- สร้าง struct ที่มี field `mock.Mock`
+
+```go
+type MyMockedObject struct {
+	mock.Mock
+}
+```
+
+- ส่วน function ที่จะ mock ให้สร้าง receiver function แบบ pointer เพื่อจะได้ `mock.Mock` ตัวเดียวกัน
+
+```go
+type MyMockedObject struct {
+	mock.Mock
+}
+
+func (m *MyMockedObject) DoSomething(number int) (string, int, bool, error) {
+	args := m.Called(number)
+	return args.String(0), args.Int(1), args.Bool(2), args.Error(3)
+}
+```
+
+- ใช้ `m.Called()` เพื่อเรียกใช้ parameter ที่ส่งเข้ามา จะได้ `args` ซึ่งเป็น slice ของค่าที่ต้อง return กลับไป ได้มาจากการตอนเรียกใช้งาน
+
+1. เรียกใช้งาน โดยใช้ฟังก์ชัน `On` ในการกำหนดว่าฟังก์ชันที่จะใช้งานนั้นชื่ออะไร และส่ง parameter อะไรไปบ้าง และฟังก์ชัน `Return` ในการกำหนดสิ่งที่ต้องการได้กลับออกมา
+
+- ตัวอย่างกรณีทำงานถูกต้อง
+
+```go
+func TestSomething(t *testing.T) {
+	// create an instance of our test object
+	testObj := new(MyMockedObject)
+
+	// setup expectations
+	testObj.On("DoSomething", 123).Return("abc", 456, true, nil)
+
+	// call the code we are testing
+	targetFuncThatDoesSomethingWithObj(testObj)
+
+	// assert that the expectations were met
+	testObj.AssertExpectations(t)
+
+}
+```
+
+- ตัวอย่างกรณีทำงานผิดพลาด
+
+```go
+func TestSomethingError(t *testing.T) {
+
+	// create an instance of our test object
+	testObj := new(MyMockedObject)
+
+	// setup expectations
+	testObj.On("DoSomething", 2).Return("", 0, false, errors.New("something error"))
+
+	// call the code we are testing
+	targetFuncThatDoesSomethingWithObj(testObj)
+
+	// assert that the expectations were met
+	testObj.AssertExpectations(t)
+
+}
+```
+
+## Unit Test Service
+
+เราจะใช้โปรเจคจาก [goapi-project-structure](https://github.com/somprasongd/blog-code/tree/main/golang/goapi-project-structure) มาใช้ในการเขียนทดสอบ โดยการทดสอบ business logic ใน service นั้น ให้เริ่มจากการทำ mock repository ก่อน
+
+### สร้าง Mock Repository
+
+สำหรับการ mock จะเขียนรวมไว้ที่ `pkg/module/todo/mocks`
+
+```go
+package mocks
+
+import (
+	"goapi-testing/pkg/common"
+	"goapi-testing/pkg/module/todo/core/dto"
+	"goapi-testing/pkg/module/todo/core/model"
+	"goapi-testing/pkg/module/todo/core/ports"
+
+	"github.com/stretchr/testify/mock"
+)
+
+type todoRepositoryMock struct {
+	mock.Mock
+}
+// สำหรับตรวจสอบว่า todoRepositoryMock conform ports.TodoRepository หรือไม่
+var _ ports.TodoRepository = &todoRepositoryMock{}
+
+func NewTodoRepositoryMock() *todoRepositoryMock {
+	return &todoRepositoryMock{}
+}
+
+func (m *todoRepositoryMock) Create(t *model.Todo) error {
+	args := m.Called(t)
+	return args.Error(0)
+}
+
+func (m *todoRepositoryMock) Find(page common.PagingRequest, filters dto.ListTodoFilter) (model.Todos, *common.PagingResult, error) {
+	args := m.Called(page, filters)
+
+  // กรณีส่งค่า nil มา ต้องตรวจสอบก่อน
+	var r0 model.Todos
+	if args.Get(0) != nil {
+		r0 = args.Get(0).(model.Todos)
+	}
+
+	var r1 *common.PagingResult
+	if args.Get(1) != nil {
+		r1 = args.Get(1).(*common.PagingResult)
+	}
+
+	return r0, r1, args.Error(2)
+}
+
+func (m *todoRepositoryMock) FindById(id string) (*model.Todo, error) {
+	args := m.Called(id)
+
+	var r0 *model.Todo
+	if args.Get(0) != nil {
+		r0 = args.Get(0).(*model.Todo)
+	}
+
+	return r0, args.Error(1)
+}
+
+func (m *todoRepositoryMock) UpdateStatusById(id string, status bool) (*model.Todo, error) {
+	args := m.Called(id, status)
+
+	var r0 *model.Todo
+	if args.Get(0) != nil {
+		r0 = args.Get(0).(*model.Todo)
+	}
+
+	return r0, args.Error(1)
+}
+
+func (m *todoRepositoryMock) DeleteById(id string) error {
+	args := m.Called(id)
+	return args.Error(0)
+}
+```
+
+### ทดสอบ todoService
+
+การทดสอบจะใช้วิธีทดสอบแบบ black box คือ จะใช้ชื่อ package ตามด้วย `_test`
+
+- ทดสอบการบันทึกรายการใหม่สำเร็จ ขั้นตอนคือ
+  - Arrage ให้เตรียมข้อมูลที่ต้องจะใช้ ข้อมูลที่คาดหวังจะได้ และ mock ให้ repo.Create() `return nil`
+  - Act ให้เรียก service.Create() โดยส่งค่าตามที่เตรียมไว้เข้าไป
+  - Assert ต้องตรวจสอบ 2 อย่าง คือ ต้องไม่มี error และข้อมูลได้ตรงตามที่คาดหวังไว้หรือไม่
+
+```go
+package service_test
+
+import (
+ // ...
+)
+
+func TestTodo(t *testing.T) {
+
+	t.Run("Add Todo Service", func(t *testing.T) {
+    // ทดสอบกรณีสร้าง todo สำเร็จ
+		t.Run("Success", func(t *testing.T) {
+			// Arrage
+      // เตรียมข้อมูลที่ต้องจะใช้
+      mockForm := dto.NewTodoForm{
+				Text: "Test new todo",
+			}
+			mockModel := mapper.CreateTodoFormToModel(mockForm)
+      // กำหนดค่าที่คาดหวังให้ได้ออกมา
+			want := mapper.TodoToDto(mockModel)
+
+			repo := mocks.NewTodoRepositoryMock()
+      // กรณีบันทึกสำเร็จ จะส่ง error เป็น nil กลับมา
+			repo.On("Create", mockModel).Return(nil)
+      // ส่ง mock repo ไปให้ todoService
+			svc := service.NewTodoService(repo)
+
+			// Act เรียกใช้งาน service
+			got, err := svc.Create(mockForm, "")
+
+			// Assert
+      // ตรวจสอบว่าต้องไม่มี error
+			assert.NoError(t, err)
+      // ตรวจสอบว่าข้อมูลที่ได้จาก service ได้ตามที่คาดหวังไว้มั้ย
+			assert.Equal(t, want, got)
+
+		})
+}
+```
+
+- ทดสอบกรณีตรวจสอบ json body ไม่ผ่าน ขั้นตอนคือ
+  - Arrage ให้เตรียมข้อมูลที่ต้องจะใช้ และไม่ต้อง mock repo.Create() เพราะไม่ได้เรียกใช้งาน
+  - Act ให้เรียก service.Create() โดยส่งค่าว่างเข้าไป
+  - Assert ต้องตรวจสอบ 2 อย่าง คือ ได้ error ตรงตามที่คาดหวังไว้หรือไม่ และ repo.Create() ต้องไม่ถูกเรียกใช้
+
+```go
+package service_test
+
+import (
+ // ...
+)
+
+func TestTodo(t *testing.T) {
+
+	t.Run("Add Todo Service", func(t *testing.T) {
+    // ทดสอบกรณีตรวจสอบ json body ไม่ผ่าน
+		t.Run("Invalid JSON Boby", func(t *testing.T) {
+			// Arrage
+      // service มีการตรวจสอบว่า text ต้องไม่เป็นค่าว่าง ให้ส่งค่าว่างเข้าไป
+			mockForm := dto.NewTodoForm{
+				Text: "",
+			}
+      // ไม่มีการเรียกใช้ repo ก็ไม่ต้อง mock ฟังก์ชัน
+			repo := mocks.NewTodoRepositoryMock()
+			svc := service.NewTodoService(repo)
+
+			// Act
+			_, err := svc.Create(mockForm, "")
+
+			// Assert
+      // ตรวจสอบว่าได้ error ถูกต้องหรือไม่
+			assert.ErrorIs(t, err, common.NewInvalidError("text: text is a required field"))
+			// ถ้าตรวจสอบไม่ผ่าน จะต้องไม่มีการเรียก repo.Create
+      repo.AssertNotCalled(t, "Create")
+
+		})
+}
+```
+
+- ทดสอบกรณีบันทึกรายการผิดพลาด ขั้นตอนคือ
+  - Arrage ให้เตรียมข้อมูลที่ต้องจะใช้ และ mock repo.Create() ให้ return error ออกมา
+  - Act ให้เรียก service.Create() โดยส่งค่าว่างเข้าไป
+  - Assert ต้องตรวจสอบว่าได้ error ตรงตามที่คาดหวังไว้หรือไม่
+
+```go
+package service_test
+
+import (
+ // ...
+)
+
+func TestTodo(t *testing.T) {
+
+	t.Run("Add Todo Service", func(t *testing.T) {
+    t.Run("Error", func(t *testing.T) {
+			// Arrage
+			mockForm := dto.NewTodoForm{
+				Text: "Test new todo",
+			}
+
+			repo := mocks.NewTodoRepositoryMock()
+			repo.On("Create", mock.AnythingOfType("*model.Todo")).Return(errors.New("Some error down call chain"))
+
+			svc := service.NewTodoService(repo)
+
+			// Act
+			_, err := svc.Create(mockForm, "")
+			assert.ErrorIs(t, err, common.ErrDbInsert)
+		})
+}
+```
+
+## Unit Test TodoHandler
+
+การทดสอบจะใช้วิธีทดสอบแบบ black box เหมือนกัน ซึ่งส่วนการทดสอบ handler นั้น จะต้องมีการสร้าง routes ขึ้นมา และสร้าง request โดยใช้ `http.NewRequest()` และส่ง request นั้นไปทดสอบ ซึ่งถ้าใช้ [fiber](https://docs.gofiber.io/) จะใช้ `app.Test()` ในการทดสอบ
+
+```go
+t.Run("test_handler_with_fiber", func(t *testing.T) {
+  // Arrange
+  // ...
+	app := fiber.New()
+  // ใส่ middleware ที่ต้องใช้
+	app.Use(requestid.New()) // reponse ต้องใช้ request id
+	cfg := todo.RouteConfig{
+		Router:      router,
+		TodoService: svc,
+	}
+  // สร้าง todo routes
+	todo.SetupRoutes(cfg)
+  // สร้าง reqesut body
+	reqBody, _ := json.Marshal(map[string]string{
+		"text": "New todo",
+	})
+	// สร้าง request
+	req, _ := http.NewRequest("POST", "/todos", bytes.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", mock.Anything)
+	// Act ทดสอบ handler
+	resp, err := app.Test(req)
+
+  // Assert
+}
+```
+
+- ทดสอบการบันทึกรายการใหม่สำเร็จ ขั้นตอนคือ
+  - Arrage ให้เตรียมข้อมูลที่ต้องจะใช้ ข้อมูลที่คาดหวังจะได้ และ mock ให้ service.Create() `return mockDto` ออกมา และเตรียม request ที่จะส่งไป
+  - Act ให้เรียก `app.Test(req)`
+  - Assert ต้องตรวจสอบ 2 อย่าง คือ ได้ response code และ response json ตามที่คาดหวังไว้หรือไม่
+
+```go
+package handler_test
+
+import (
+ // ...
+)
+
+func TestTodo(t *testing.T) {
+
+	t.Run("Add Todo", func(t *testing.T) {
+    t.Run("success_200", func(t *testing.T) {
+			//Arrange
+			mockDto := dto.TodoResponse{
+				ID:        "bfbc2a69-9825-4a0e-a8d6-ffb985dc719c",
+				Text:      "New todo",
+				Completed: false,
+			}
+
+			expectedCode := http.StatusCreated
+			expectedResp := common.Response{
+				Status: expectedCode,
+				Data: map[string]interface{}{
+					"todo": mockDto,
+				},
+				RequestId: mock.Anything,
+			}
+
+			svc := mocks.NewTaskServiceMock()
+			svc.On("Create", mock.AnythingOfType("dto.NewTodoForm"), mock.Anything).Return(&mockDto, nil)
+
+			//http://localhost:8000/todos
+			app := fiber.New()
+			app.Use(requestid.New())
+			cfg := todo.RouteConfig{
+				Router:      router,
+				TodoService: svc,
+			}
+			todo.SetupRoutes(cfg)
+
+			reqBody, err := json.Marshal(map[string]string{
+				"text": "New todo",
+			})
+
+			assert.NoError(t, err)
+
+			req, err := http.NewRequest("POST", "/todos", bytes.NewReader(reqBody))
+			assert.NoError(t, err)
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("X-Request-ID", mock.Anything)
+
+			//Act
+			resp, err := app.Test(req)
+			assert.NoError(t, err)
+
+			//Assert
+			if assert.Equal(t, expectedCode, resp.StatusCode) {
+				body, _ := io.ReadAll(resp.Body)
+				expected, _ := json.Marshal(expectedResp)
+				assert.JSONEq(t, string(expected), string(body))
+			}
+		})
+}
+```
+
+โค้ดสำหรับการทดสอบทั้งหมด ทั้ง service และ handler สามารถดูได้จาก[ที่นี่](https://github.com/somprasongd/blog-code/tree/main/golang/goapi-testing)
+
+## สรุป
+
+เมื่อเราใช้หลักการของ [Hexagonal Architecture](https://somprasongd.work/blog/architecture/hexagonal) มาใช้ จะทำให้เราสามารถเขียนทดสอบได้ง่ายขึ้น เพราะมี ports เป็น dependency เราเพียงแค่สร้าง mock ที่ implement ตาม port แล้วส่งไปแทน port ของจริง เมื่อต้องการทดสอบ

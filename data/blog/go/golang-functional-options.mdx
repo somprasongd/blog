@@ -1,0 +1,137 @@
+---
+title: 'การกำหนด default parameter ในภาษา Go'
+date: '2023-04-08'
+tags: ['go']
+draft: false
+summary: 'ภาษา Go ไม่มีการสนับสนุน default parameter แล้วจะทำอย่างไรล่ะ'
+---
+
+# การกำหนด default parameter ในภาษา Go
+
+ภาษา Go ไม่มีการสนับสนุน default parameter ตรงๆ เหมือนกับภาษาอื่นๆ เช่น JavaScript แต่เราสามารถทำได้ง่ายๆ ดังนี้
+
+ตัวอย่างเช่น ถ้าเราต้องการเขียนฟังก์ชั่นที่รับพารามิเตอร์ชื่อ `name` และ `phoneNumber` แต่หากไม่มีการส่งค่า `phoneNumber` เข้ามา จะกำหนดให้ `phoneNumber`เป็น `unknown`
+
+```go
+package main
+
+import "fmt"
+
+func getInfo(name string, phoneNumber string) string {
+	if len(phoneNumber) == 0 {
+		phoneNumber = "unknown"
+	}
+	return fmt.Sprintf("Name: %s, Phone number: %s", name, phoneNumber)
+}
+
+func main() {
+	fmt.Println(getInfo("John", ""))
+	fmt.Println(getInfo("Jane", "+660812345678"))
+}
+
+// Output:
+Name: John, Phone number: unknown
+Name: Jane, Phone number: +660812345678
+```
+
+## ใช้ variadic function
+
+จากโค้ดก่อนหน้าจะเห็นว่า phoneNumber เราไม่จำเป็นต้องส่งไปก็ได้ (optional parameter) การจะทำแบบนั้นได้จะใช้คุณสมบัติของ variadic function มาช่วย
+
+ซึ่ง variadic function คือฟังก์ชั่นที่สามารถรับพารามิเตอร์ที่ไม่จำกัดจำนวนได้ ดังนั้นเราสามารถเขียนฟังก์ชั่นให้รับพารามิเตอร์ตามปกติ และให้ค่า default ของพารามิเตอร์เป็นค่า zero value ของประเภทของพารามิเตอร์นั้นๆ
+
+สามารถแก้ไขโค้ดตัวอย่างได้ดังนี้
+
+```go
+package main
+
+import "fmt"
+
+func getInfo(name string, phoneNumber ...string) string {
+	pn := "unknown"
+	if len(phoneNumber) > 0 {
+		pn = phoneNumber[0]
+	}
+	return fmt.Sprintf("Name: %s, Phone number: %s", name, pn)
+}
+
+func main() {
+	fmt.Println(getInfo("John"))
+	fmt.Println(getInfo("Jane", "+660812345678"))
+}
+
+// Output:
+Name: John, Phone number: unknown
+Name: Jane, Phone number: +660812345678
+```
+
+ซึ่งจะได้ผลลัพธ์เหมือนกัน แต่เราไม่จำเป็นต้องส่ง phineNumber เข้าไปแล้ว แต่วิธีจะใช้ได้เมื่อต้องการ optional parameter แค่ตัวเดียว
+
+## Functional Options
+
+สุดท้ายถ้าเราต้องการ optional parameter มากกว่า 1 ตัว เราจะใช้ functional options pattern มาช่วย
+
+ตัวอย่างเช่น เรามี parameter 3 ตัว คือ ตัวแรก name จะต้องส่งไปทุกครั้ง และอีก 2 ตัว คือ `phone number` กับ `email` เป็น optional parameters สามารถทำได้ดังนี้
+
+```go
+package main
+
+import "fmt"
+
+type InfoOptions struct {
+	PhoneNumber string
+	Email       string
+}
+
+type InfoOption func(i *InfoOptions)
+
+func WithPhoneNumber(pn string) InfoOption {
+	return func(i *InfoOptions) {
+		i.PhoneNumber = pn
+	}
+}
+
+func WithPhoneEmail(email string) InfoOption {
+	return func(i *InfoOptions) {
+		i.Email = email
+	}
+}
+
+func getInfo(name string, opts ...InfoOption) string {
+	opt := InfoOptions{
+		PhoneNumber: "unknown",
+		Email:       "unknown",
+	}
+
+	for _, applyOpt := range opts {
+		applyOpt(&opt)
+	}
+
+	return fmt.Sprintf("Name: %s, Phone number: %s, Email: %s", name, opt.PhoneNumber, opt.Email)
+}
+
+func main() {
+	fmt.Println(getInfo("John"))
+	fmt.Println(getInfo("Jane", WithPhoneNumber("+660812345678")))
+	fmt.Println(getInfo("James", WithPhoneNumber("+660812345600"), WithPhoneEmail("james@mail.com")))
+}
+
+// Output:
+Name: John, Phone number: unkonw, Email: unknown
+Name: Jane, Phone number: +660812345678, Email: unknown
+Name: James, Phone number: +660812345600, Email: james@mail.com
+```
+
+โค้ดดังกล่าวเป็นตัวอย่างการใช้งานการสร้างฟังก์ชันแบบตัวเลือก (Option pattern) ในภาษา Go โดยใช้ฟังก์ชันตัวแปรแบบ func(i \*InfoOptions) ซึ่งจะรับค่า struct InfoOptions เป็นพารามิเตอร์และนำค่าของตัวแปรเข้าไปปรับปรุงในตัวแปรนั้นๆ
+
+การทำงานของโค้ดดังกล่าวอธิบายได้ดังนี้:
+
+1. กำหนด struct ชื่อ **`InfoOptions`** ซึ่งมี properties คือ **`PhoneNumber`** และ **`Email`** เพื่อใช้ในการเก็บข้อมูลที่จะถูกส่งเข้าฟังก์ชัน
+2. กำหนด type ชื่อ **`InfoOption`** ที่เป็น function signature โดยฟังก์ชันนี้จะรับตัวแปรแบบ pointer ชนิด **`InfoOptions`** และไม่มีการ return ค่า
+3. กำหนดฟังก์ชัน **`WithPhoneNumber`** ที่จะ return ฟังก์ชันแบบตัวเลือก **`InfoOption`** ซึ่งจะรับตัวแปรเป็นเบอร์โทรศัพท์และจะอัปเดตค่าของ **`PhoneNumber`** ใน **`InfoOptions`**
+4. กำหนดฟังก์ชัน **`WithPhoneEmail`** ที่จะ return ฟังก์ชันแบบตัวเลือก **`InfoOption`** ซึ่งจะรับตัวแปรเป็นอีเมลและจะอัปเดตค่าของ **`Email`** ใน **`InfoOptions`**
+5. กำหนดฟังก์ชัน **`getInfo`** ที่รับตัวแปร **`name`** และ **`opts ...InfoOption`** ที่เป็นตัวเลือกของ **`InfoOptions`** โดยฟังก์ชันนี้จะสร้างตัวแปร **`opt`** จาก **`InfoOptions`** โดยกำหนดค่าเริ่มต้นของ **`PhoneNumber`** และ **`Email`** ให้เป็น "unknown"
+6. ใช้ loop for-range เพื่อวนรอบตามจำนวนของ **`opts`** และเรียกใช้ฟังก์ชันตัวแปรแบบ **`InfoOption`** ที่ถูกส่งเข้ามากับ **`opt`** เพื่ออัปเดตค่าของ **`InfoOptions`** โดยส่ง pointer ของ **`opt`** ไปให้ฟังก์ชันตัวแปรแต่ละตัว
+7. ในฟังก์ชัน **`main`** จะมีการเรียกใช้ **`getInfo`** กับชื่อของผู้ใช้งาน และตัวเลือกที่ส่งเข้าไป เพื่อแสดงผลลัพธ์ออกทางหน้าจอ โดยมีการส่งตัวเลือก **`WithPhoneNumber`** และ **`WithPhoneEmail`** สองตัวไปด้วย
+
+จะเห็นได้ว่าโค้ดดังกล่าวนั้นเป็นการใช้งานแบบตัวเลือก (Option pattern) ซึ่งช่วยให้สามารถสร้างฟังก์ชันที่รับพารามิเตอร์ได้หลายรูปแบบ โดยไม่ต้องกำหนดหลายฟังก์ชันให้เป็น overload หรือจัดการด้วยพารามิเตอร์ default ที่ซับซ้อน นอกจากนี้ การใช้งานแบบตัวเลือกยังช่วยให้การเปลี่ยนแปลงของพารามิเตอร์ไม่มีผลต่อการเรียกใช้ฟังก์ชันที่เหลือไปและเป็นไปตามความต้องการของผู้ใช้งานได้อย่างยืดหยุ่นและสะดวกสบาย

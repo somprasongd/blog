@@ -1,0 +1,97 @@
+---
+title: 'ต่อฐานข้อมูล MongoDB โดยใช้ Mongoose ORM'
+date: '2016-12-22'
+tags: ['nodejs', 'mongodb']
+draft: false
+summary: 'ใน Node.js ถ้าต้องการติดต่อการฐานข้อมูล MongoDB จะนิยมใช้ Mongoose ORM'
+---
+
+# ต่อฐานข้อมูล MongoDB โดยใช้ Mongoose ORM
+
+ใน Node.js ถ้าต้องการติดต่อการฐานข้อมูล [MongoDB](/blog/db/mongo/mongodb-101) จะนิยมใช้ Mongoose ORM
+
+**Web site:** [http://mongoosejs.com/](http://mongoosejs.com/)
+
+**Installation:** `$ npm install mongoose --save`
+
+## การใช้งาน
+
+```javascript
+var mongoose = require('mongoose')
+mongoose.connect('mongodb://localhost/test')
+
+// สร้าง Model ใช้ model('name', {field: type}) หรือจะสร้างเป็น schema ก็ได้ model('name', schema object)
+var Cat = mongoose.model('Cat', { name: String })
+
+// สร้าง object พร้อมระบุค่า
+var kitty = new Cat({ name: 'Zildjian' })
+
+// สั่งบันทึกโดยใช้ save() ถ้าไม่ส่ง callback ไปจะ return promise() มาให้
+kitty.save(function (err) {
+  if (err) {
+    console.log(err)
+  } else {
+    console.log('meow')
+  }
+})
+```
+
+## Schema Types
+
+schema types สามารถระบุ type ของ field ต่างๆ ได้ และยังสามารถกำหนดค่า required, default, validations, getter, setters, field selection default สำหรับการ query ได้ ซึ่ง type ที่รองรับมีดังนี้
+
+- String
+- Number
+- Date
+- Buffer
+- Boolean
+- Mixed
+- Objectid
+- Array
+
+ตัวอย่างการใช้งาน
+
+```javascript
+var schema = new Schema({
+  name: String,
+  binary: Buffer,
+  living: Boolean,
+  updated: { type: Date, default: Date.now },
+  age: { type: Number, min: 18, max: 65 },
+  mixed: Schema.Types.Mixed,
+  _someId: Schema.Types.ObjectId,
+  array: [],
+  ofString: [String],
+  ofNumber: [Number],
+  ofDates: [Date],
+  ofBuffer: [Buffer],
+  ofBoolean: [Boolean],
+  ofMixed: [Schema.Types.Mixed],
+  ofObjectId: [Schema.Types.ObjectId],
+  nested: {
+    stuff: { type: String, lowercase: true, trim: true },
+  },
+})
+
+// example use
+
+var Thing = mongoose.model('Thing', schema)
+
+var m = new Thing()
+m.name = 'Statue of Liberty'
+m.age = 125
+m.updated = new Date()
+m.binary = new Buffer(0)
+m.living = false
+m.mixed = { any: { thing: 'i want' } }
+m.markModified('mixed')
+m._someId = new mongoose.Types.ObjectId()
+m.array.push(1)
+m.ofString.push('strings!')
+m.ofNumber.unshift(1, 2, 3, 4)
+m.ofDates.addToSet(new Date())
+m.ofBuffer.pop()
+m.ofMixed = [1, [], 'three', { four: 5 }]
+m.nested.stuff = 'good'
+m.save(callback)
+```

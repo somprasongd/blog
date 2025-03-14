@@ -1,0 +1,138 @@
+---
+title: 'การกำหนด Default Value ให้กับ Struct ในภาษา Go'
+date: '2023-04-07'
+tags: ['go']
+draft: false
+summary: 'ใน Go ไม่มีการกำหนด default value ให้กับ struct โดยตรง แล้วจะทำอย่างไรล่ะ'
+---
+
+# การกำหนด Default Value ให้กับ Struct ในภาษา Go
+
+ใน Go ไม่มีการกำหนด default value ให้กับ struct โดยตรง เมื่อประกาศ struct จะไม่มีค่า default สำหรับ field ใดๆ ใน struct นั้นๆ ถ้าต้องการกำหนดค่า default สำหรับ struct ใน Go สามารถทำได้โดยใช้วิธีการสร้างฟังก์ชั่นที่คืนค่า struct พร้อมกับกำหนดค่า default สำหรับ field ใน struct นั้น ๆ เช่น
+
+```go
+type Person struct {
+  Name    string
+  Age     int
+  Address string
+}
+
+func NewPerson() Person {
+  return Person{
+    Name:    "John Doe",
+    Age:     30,
+    Address: "Unknown",
+  }
+}
+```
+
+ในตัวอย่างข้างต้นฟังก์ชัน `NewPerson` จะคืนค่า struct `Person` พร้อมกับกำหนดค่า default สำหรับ field ทั้ง 3 ตัว คือ
+
+- `Name` ใช้ค่า `"John Doe"`
+- `Age` ใช้ค่า `30`
+- `Address` ใช้ค่า `"Unknown**"`
+
+ซึ่งสามารถใช้งานได้โดยการเรียกใช้งานฟังก์ชัน `NewPerson` แทนการประกาศ struct `Person` โดยตรง ดังนี้
+
+```go
+package main
+
+func main() {
+	p := NewPerson()
+
+	fmt.Println(p.Name)    // Output: "John Doe"
+  fmt.Println(p.Age)     // Output: 30
+  fmt.Println(p.Address) // Output: unknown
+}
+```
+
+## สร้าง tag default
+
+เราสามารถสร้าง tag ใหม่ขึ้นมา ตัวอย่างเช่น `default` เพื่อใช้กำหนดค่า default ให้กับ field ใน struct ได้ ดังนี้
+
+```go
+type Person struct {
+  Name    string `default:"John Doe"`
+  Age     int    `default:"30"`
+  Address string `default:"Unknown"`
+}
+```
+
+และใช้ความรู้เรื่อง [reflect](https://somprasongd.work/blog/go/golang-reflect) เข้ามาช่วยในการดึงค่าจาก tag ออกมา ดังน้ี
+
+```go
+func SetDefaults(obj interface{}) {
+	// ใช้ reflect ในการดึงค่าของ struct และตรวจสอบประเภทของ field
+	val := reflect.ValueOf(obj).Elem()
+	typ := val.Type()
+
+	// วนลูปตามจำนวน field ที่มีใน struct
+	for i := 0; i < val.NumField(); i++ {
+		field := val.Field(i)
+
+		// ตรวจสอบว่า field นั้นมีค่าที่ถูกต้องหรือไม่
+		if !field.IsValid() {
+			continue // ข้ามไปยัง field ถัดไป
+		}
+
+		// ถ้าเป็น struct ให้เรียกฟังก์ชัน SetDefaults ต่อที่ field นั้นๆ
+		if field.Kind() == reflect.Struct {
+			SetDefaults(field.Addr().Interface())
+			continue // ข้ามไปยัง field ถัดไป
+		}
+
+		// ดึงค่า tag "default" ของ field นั้นๆ
+		tag := typ.Field(i).Tag.Get("default")
+		if tag == "" {
+			continue // ข้ามไปยัง field ถัดไป
+		}
+
+		// ตรวจสอบประเภทของ field และกำหนดค่า default ตาม tag ที่ระบุ
+		setDefault(field, tag)
+	}
+}
+
+func setDefault(field reflect.Value, tag string) {
+  // ตรวจสอบประเภทของ field และกำหนดค่า default ตาม tag ที่ระบุ
+	switch field.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		// ตรวจสอบว่า tag ที่ระบุเป็นตัวเลขที่สามารถแปลงเป็น int ได้
+		if i, err := strconv.ParseInt(tag, 10, 64); err == nil {
+			field.SetInt(i) // กำหนดค่า default เป็นค่า int ที่แปลงมาได้
+		}
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		// ตรวจสอบว่า tag ที่ระบุเป็นตัวเลขที่สามารถแปลงเป็น uint ได้
+		if i, err := strconv.ParseUint(tag, 10, 64); err == nil {
+			field.SetUint(i) // กำหนดค่า default เป็นค่า uint ที่แปลงมาได้
+		}
+	case reflect.Float32, reflect.Float64:
+		// ตรวจสอบว่า tag ที่ระบุเป็นตัวเลขที่สามารถแปลงเป็น float ได้
+		if f, err := strconv.ParseFloat(tag, 64); err == nil {
+			field.SetFloat(f) // กำหนดค่า default เป็นค่า float ที่แปลงมาได้
+		}
+	case reflect.Bool:
+		// ตรวจสอบว่า tag ที่ระบุเป็น "true" หรือ "false"
+		if strings.ToLower(tag) == "true" {
+			field.SetBool(true) // กำหนดค่า default เป็น true
+		} else if strings.ToLower(tag) == "false" {
+			field.SetBool(false) // กำหนดค่า default เป็น false
+		}
+	case reflect.String:
+		field.SetString(tag) // กำหนดค่า default เป็นค่า string ที่ระบุใน tag
+	default:
+		// ไม่รองรับชนิดข้อมูล
+	}
+}
+```
+
+ตัวอย่างการใช้งาน
+
+```go
+package main
+
+func main() {
+	p := Person{}
+	SetDefaults(&p)
+	fmt.Printf("%+v\n", p)
+}
+```

@@ -1,0 +1,627 @@
+---
+title: 'API Service with Go: Access Token & Refresh Token'
+date: '2022-08-05'
+lastmod: '2022-08-05'
+tags: ['authentication', 'go']
+draft: false
+summary: 'ป้องกันการเข้าถึงทรัพยากรบนเซิร์ฟเวอร์ด้วย Access Token & Refresh Token'
+---
+
+# Access Token & Refresh Token
+
+จากบทความเรื่องการ [Authentication with JWT](https://somprasongd.work/blog/go/golang-api-p12-jwt) ตัว token ที่สร้างขึ้นมาสำหรับใช้ยืนยันตัวตนนั้นจะเห็นว่ามันสามารถใช้งานได้ตลอดกาล ซึ่งมันไม่ปลอดภัยถ้าเกิด token นั้นหลุดออกไป ทำให้ใครก็ตามที่มี token สามารถเข้าใช้งานระบบเราได้ ดังนั้นต้องแก้ใขโดยทำ 2 สิ่ง คือ
+
+- ทำให้ token มีเวลาหมดอายุ
+- ต้อง revoke token นั้นออกไปได้
+
+ซึ่งสามารถทำได้โดยการใช้ Access Token และ Refresh Token
+
+โดยจะเอาโค้ดจาก[ที่นี่](https://github.com/somprasongd/blog-code/tree/main/golang/goapi-casbin) มาแก้ไข
+
+## Access Token
+
+Access Token คือ token ที่แนบไปกับทุก request เพื่อใช้ยืนยันตัวตน และต้องมีอายุสั้นๆ เช่น 5 - 60 นาที ดังนั้นเราจะเอา jwt เดิมที่สร้างขึ้นมาในขั้นตอนการ Login มาเพิ่มเวลาหมดอายุเข้าไป มีขั้นตอน ดังนี้
+
+- แก้ไขฟังก์ชัน `GenerateToken` ให้กำหนดเวลาหมดอายุได้
+
+```go
+func GenerateToken(uid string, payload map[string]any, secretKey string, expires time.Duration) (string, time.Time, error) {
+	claims := jwt.MapClaims{}
+	claims["sub"] = uid
+	claims["iat"] = jwt.NewNumericDate(time.Now())
+
+	expiresAt := time.Now().Add(expires)
+	claims["exp"] = jwt.NewNumericDate(expiresAt)
+
+	for k, v := range payload {
+		claims[k] = v
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	//encoded string
+	encodedToken, err := token.SignedString([]byte(secretKey))
+	return encodedToken, expiresAt, err
+}
+```
+
+- ในขั้นตอนการ Login ให้กำหนดเวลาหมดอายุเข้าไป โดย access token นั่นจะต้องมีอายุสั้นๆ เช่น 5 นาที
+
+```go
+func (s authService) Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error) {
+	// validate form
+	// ค้นหาจาก email
+	// ตรวจสอบรหัสผ่าน ตรงกันหรือไม่
+
+	tokenId, _ := uuid.NewV4()
+	payload := map[string]any{
+		"user_id": user.ID.String(),
+		"email":   user.Email,
+		"role":    user.Role.String(),
+	}
+
+  // สร้าง access token
+	accessToken, expiresAt, err := util.GenerateToken(tokenId.String(), payload, s.config.Token.AccessSecretKey, s.config.Token.AccessExpires)
+
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrGenerateToken
+	}
+
+	// ตอบกลับไปพร้อมข้อมูล user
+}
+```
+
+- ส่งเวลาหมดอายุกลับไปให้ client ด้วย
+
+```diff
+type AuthResponse struct {
+	User                 UserInfo  `json:"user"`
+-	Token                string    `json:"token"`
++	AccessToken          string    `json:"access_token"`
++	AccessTokenExpiresAt time.Time `json:"access_token_expires"`
+}
+```
+
+```go
+func (s authService) Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error) {
+	// validate form
+	// ค้นหาจาก email
+	// ตรวจสอบรหัสผ่าน ตรงกันหรือไม่
+
+	// สร้าง jwt token
+
+	// ตอบกลับไปพร้อมข้อมูล user
+	serialized := dto.AuthResponse{
+		User: dto.UserInfo{
+			ID:    user.ID.String(),
+			Email: user.Email,
+			Role:  user.Role.String(),
+		},
+		AccessToken:          accessToken,
+		AccessTokenExpiresAt: expiresAt,
+	}
+	return &serialized, nil
+}
+```
+
+- ทดสอบ Login
+
+```bash
+curl -XPOST \
+-H "Content-type: application/json" \
+-d '{
+  "email": "user@mail.com",
+  "password": "user"
+}' \
+'http://localhost:8080/api/v1/auth/login'
+
+// Output
+{
+  "status": 200,
+  "data": {
+    "auth": {
+      "user": {
+        "id": "6909a198-831d-4eb3-911c-5275f013fe97",
+        "email": "user@mail.com",
+        "role": "user"
+      },
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAbWFpbC5jb20iLCJleHAiOjE2NTk2ODI1NDEsImlhdCI6MTY1OTY4MjI0MSwicm9sZSI6InVzZXIiLCJzdWIiOiI5YjMzYmMyMS1lYzY1LTQyZjgtOGIyZS1iZmU2NzlkZjJhODYiLCJ1c2VyX2lkIjoiNjkwOWExOTgtODMxZC00ZWIzLTkxMWMtNTI3NWYwMTNmZTk3In0.7LDxCSfB9j0KwFFNJkpsDSLAGEfsSZzxEqL39jvZCnA",
+      "access_token_expires": "2022-08-05T13:55:41.952302+07:00"
+    }
+  },
+  "requestId": "d7f4c6b3-0d4a-4b26-98ec-6d86e2c2a225"
+}
+```
+
+## Refresh Token
+
+เมื่อ Access Token หมดอายุ เราจะไม่สามารถใช้งานต่อได้ ถ้าต้องไป Login ใหม่ทุกครั้งที่หมดอายุคงไม่ดีแน่ จึงเลยมีการสร้าง Refresh Token ขึ้นมา เพื่อใช้ในการสร้าง Access Token ใหม่แทนการ Login ดังนั้นจะต้องมีการเก็บ token id เอาไว้อ้างอิงว่าเป็นผู้ใช้งานคนไหนด้วย
+
+### การเก็บ tokenId
+
+การเก็บ tokenId นั้นเราจะเก็บลงฐานข้อมูลเลยก็ได้ โดยทำการเชื่อม `tokenId` เข้ากับ `userId` เอาไว้ เพื่อใช้ในการดึงข้อมูลผู้ใช้งานก็ได้แบบนี้
+
+```sql
+CREATE TABLE tokens (
+    id      uuid NOT NULL DEFAULT uuid_generate_v4(),
+    tokenId uuid NOT NULL,
+    userId  uuid NOT NULL,
+    created_at timestamptz NOT NULL default current_timestamp,
+    expires_at timestamptz NOT NULL,
+	  CONSTRAINT tokens_pkey PRIMARY KEY (id),
+    CONSTRAINT tokens_userId_fkey FOREIGN KEY (userId) REFERENCES users (id) ON DELETE RESTRICT ON UPDATE CASCADE
+);
+CREATE UNIQUE INDEX tokens_token_key ON tokens(tokenId);
+```
+
+แต่การติดต่อกับฐานข้อมูลบ่อยๆ มันช้า ในบทความนี้เลยจะเลือกบันทึกไว้ใน Redis แทน เพื่อต้องเข้าถึงข้อมูลบ่อยๆ และสามารถกำหนดเวลาหมดอายุได้ด้วย ซึ่งข้อมูลนั้นก็จะถูกลบออกไปเอง
+
+### สร้าง Refresh Token
+
+- เริ่มจากสร้าง TokenRepository เอาไว้สำหรับ บันทึก อ่าน และลบข้อมูล token ใน Redis
+
+```go
+type TokenRepository interface {
+	SetToken(tokenId string, data map[string]any, duration time.Duration) error
+	GetToken(tokenId string) (string, error)
+	DeleteToken(tokenId string) (int64, error)
+}
+```
+
+```go
+package repository
+
+import (
+	"fmt"
+	"goapi/pkg/module/auth/core/ports"
+	"goapi/pkg/util/cache"
+	"time"
+)
+
+const (
+	prefix = "TOKEN::"// กำหนด prefix ของ key สำหรับ token
+)
+
+type tokenRepositiry struct {
+	cache *cache.RedisClient
+}
+
+func NewTokenRepository(cache *cache.RedisClient) ports.TokenRepository {
+	return &tokenRepositiry{
+		cache: cache,
+	}
+}
+
+func (r tokenRepositiry) SetToken(tokenId string, data map[string]any, duration time.Duration) error {
+	return r.cache.Set(fmt.Sprintf("%s%s", prefix, tokenId), data, duration)
+}
+
+func (r tokenRepositiry) GetToken(tokenId string) (string, error) {
+	return r.cache.Get(fmt.Sprintf("%s%s", prefix, tokenId))
+}
+
+func (r tokenRepositiry) DeleteToken(tokenId string) (int64, error) {
+	return r.cache.Delete(fmt.Sprintf("%s%s", prefix, tokenId))
+}
+```
+
+- แก้ไข Login Service ให้เพิ่มการสร้าง Refresh Token และบันทึกเก็บไว้ใน Redis ไว้ก่อนการสร้าง Access Token ซึ่ง Refresh Token จะมีแค่ข้อมูล `tokenId` เท่านั้น และให้มีอายุ 30 วัน
+
+```go
+func (s authService) Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error) {
+	// validate form
+	// ค้นหาจาก email
+	// ตรวจสอบรหัสผ่าน ตรงกันหรือไม่
+
+	tokenId, _ := uuid.NewV4()
+	payload := map[string]any{
+		"user_id": user.ID.String(),
+		"email":   user.Email,
+		"role":    user.Role.String(),
+	}
+
+  // สร้าง refresh token
+	refreshToken, refreshExpiresAt, err := util.GenerateToken(tokenId.String(), nil, s.config.Token.RefreshSecretKey, s.config.Token.RefreshExpires)
+
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrGenerateRefreshToken
+	}
+
+	// บันทึก user ลง redis
+	err = s.tokenRepo.SetToken(tokenId.String(), payload, s.config.Token.RefreshExpires)
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrGenerateRefreshToken
+	}
+
+  // สร้าง access token
+
+	// ตอบกลับไปพร้อมข้อมูล user
+}
+```
+
+- และแก้ให้ส่งค่า Refresh Token กลับไปด้วย
+
+```diff
+func (s authService) Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error) {
+	// validate form
+	// ค้นหาจาก email
+	// ตรวจสอบรหัสผ่าน ตรงกันหรือไม่
+	// สร้าง refresh token
+  // บันทึก user ลง redis
+	// สร้าง access token
+
+	// ตอบกลับไปพร้อมข้อมูล user
+	serialized := dto.AuthResponse{
+		User: &dto.UserInfo{
+			ID:    user.ID.String(),
+			Email: user.Email,
+			Role:  user.Role.String(),
+		},
+		AccessToken:          accessToken,
+		AccessTokenExpiresAt: expiresAt,
++   RefreshToken:          refreshToken,
++	  RefreshTokenExpiresAt: refreshExpiresAt,
+	}
+	return &serialized, nil
+}
+```
+
+- ทดสอบ Login
+
+```bash
+curl -XPOST \
+-H "Content-type: application/json" \
+-d '{
+  "email": "user@mail.com",
+  "password": "user"
+}' \
+'http://localhost:8080/api/v1/auth/login'
+
+// Output
+{
+  "status": 200,
+  "data": {
+    "auth": {
+      "user": {
+        "id": "a5cebe10-74d9-42e0-b4b6-236c3805f6ba",
+        "email": "user@mail.com",
+        "role": "user"
+      },
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAbWFpbC5jb20iLCJleHAiOjE2NTk2OTI5NjAsImlhdCI6MTY1OTY5MjY2MCwicm9sZSI6InVzZXIiLCJzdWIiOiJkM2EyMDYxZC1mMDMyLTQ5YTEtYTBiNS1kMDZlNTU0Y2YzYjQiLCJ1c2VyX2lkIjoiYTVjZWJlMTAtNzRkOS00MmUwLWI0YjYtMjM2YzM4MDVmNmJhIn0.FwAVSlIKLdAkXmt2Ty6RsfxnKKb5Pb69_TpVdc2kCk4",
+      "access_token_expires": "2022-08-05T16:49:20.7117156+07:00",
+      "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NjIyODQ2NjAsImlhdCI6MTY1OTY5MjY2MCwic3ViIjoiZDNhMjA2MWQtZjAzMi00OWExLWEwYjUtZDA2ZTU1NGNmM2I0In0.nVm_N85fShKDYuijuJCrr8e-YoNHN0PXWLIMkVem_kI",
+      "refresh_token_expires": "2022-09-04T16:44:20.7097125+07:00"
+    }
+  },
+  "requestId": "24c8a26d-d321-4bbc-95f8-8b1a41014d93"
+}
+```
+
+### สร้าง API สำหรับสร้าง Access Token ใหม่
+
+เราจะสร้าง API `POST /api/v1/auth/refresh` ขึ้น ไว้สำหรับสร้าง access token ใหม่ จาก refresh token ที่ส่งมา
+
+- เริ่มจากสร้าง RefreshToken Service
+
+```diff
+type AuthService interface {
+	Register(form dto.RegisterForm, reqId string) error
+	Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error)
+	Profile(email string, reqId string) (*dto.UserInfo, error)
+	UpdateProfile(email string, form dto.UpdateProfileForm, reqId string) (*dto.UserInfo, error)
++	RefreshToken(form dto.RefreshForm, reqId string) (*dto.AuthResponse, error)
+}
+```
+
+- การทำงาน คือ จะรับ refresh token มาตรวจสอบ และนำไปดึงข้อมูลผู้ใช้งานใน redis ออกมา สร้าง access token และสุดท้ายก็ทำการ rotate refresh token นี้ด้วย เพื่อป้องกันการใช้งานซ้ำ โดยจะลบออกจาก Redis
+
+```go
+func (s authService) RefreshToken(form dto.RefreshForm, reqId string) (*dto.AuthResponse, error) {
+	// validate form
+	err := common.ValidateDto(form)
+	if err != nil {
+		return nil, common.NewInvalidError(err.Error())
+	}
+
+	// ตรวจสอบ refresh token ว่ายัง valid หรือไม่
+	cliams, err := util.ValidateToken(form.Token, s.config.Token.RefreshSecretKey)
+
+	if err != nil {
+    logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrInvalidRefreshToken
+	}
+
+	// เอา token id ไปหาใน redis
+	tokenId := cliams["sub"].(string)
+	encodedUser, err := s.tokenRepo.GetToken(tokenId)
+
+	if err != nil {
+    logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrInvalidRefreshToken
+	}
+
+  // ถ้าอ่านค่าได้เป็นค่าว่าง แสดงว่าหมดอายุแล้ว
+	if encodedUser == "" {
+		return nil, ErrInvalidRefreshToken
+	}
+
+	// อ่านค่า user ออกมาไว้ใน payload
+	payload := map[string]any{}
+	err = json.Unmarshal([]byte(encodedUser), &payload)
+	if err != nil {
+    logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrUnmarshalPayload
+	}
+
+	// สร้าง tokenId ใหม่
+	newTkId, _ := uuid.NewV4()
+
+	// สร้าง refresh token ใหม่
+	refreshToken, refreshExpiresAt, err := util.GenerateToken(newTkId.String(), nil, s.config.Token.RefreshSecretKey, s.config.Token.RefreshExpires)
+
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrGenerateRefreshToken
+	}
+
+	// บันทึก user ลง redis
+	err = s.tokenRepo.SetToken(newTkId.String(), payload, s.config.Token.RefreshExpires)
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrGenerateRefreshToken
+	}
+	// ลบ tokenId เดิม ป้องกันใช้ซ้ำ
+	s.tokenRepo.DeleteToken(tokenId)
+
+	// สร้าง access token ใหม่
+	accessToken, accessExpiresAt, err := util.GenerateToken(newTkId.String(), payload, s.config.Token.AccessSecretKey, s.config.Token.AccessExpires)
+
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return nil, ErrGenerateAccessToken
+	}
+
+	// ส่ง token ใหม่กลับไป
+	serialized := dto.AuthResponse{
+		AccessToken:           accessToken,
+		AccessTokenExpiresAt:  accessExpiresAt,
+		RefreshToken:          refreshToken,
+		RefreshTokenExpiresAt: refreshExpiresAt,
+	}
+	return &serialized, nil
+}
+```
+
+- สร้าง Handler สำหรับ Refresh Token
+
+```go
+type AuthHandler interface {
+	Register(common.HContext) error
+	Login(c common.HContext) error
+	Profile(c common.HContext) error
+	UpdateProfile(c common.HContext) error
+	RefreshToken(c common.HContext) error
+}
+
+// @Summary Refresh Token
+// @Description Generate new access and refresh token from refresh token
+// @Tags Auth
+// @Accept  json
+// @Produce  json
+// @Param user body swagger.RefreshForm true "Refresh Token Data"
+// @Failure 401 {object} swagdto.Error401
+// @Failure 422 {object} swagdto.Error422{error=swagger.ErrLoginSampleData}
+// @Failure 500 {object} swagdto.Error500
+// @Success 200 {object} swagdto.Response{data=swagger.AuthSampleData}
+// @Router /auth/login [post]
+func (h authHandler) RefreshToken(c common.HContext) error {
+	// แปลง JSON เป็น struct
+	form := new(dto.RefreshForm)
+	if err := c.BodyParser(form); err != nil {
+		return common.ResponseError(c, common.ErrBodyParser)
+	}
+	// ส่งต่อไปให้ service ทำงาน
+	auth, err := h.serv.RefreshToken(*form, c.RequestId())
+	if err != nil {
+		// error จะถูกจัดการมาจาก service แล้ว
+		return common.ResponseError(c, err)
+	}
+
+	return common.ResponseOk(c, "auth", auth)
+}
+```
+
+- สร้าง Route ใหม่
+
+```diff
+func SetupRoutes(cfg RouteConfig) {
+	h := handler.NewAuthHandler(cfg.AuthService)
+
+	auth := cfg.Router.Group(cfg.BaseURL + "/auth")
+
+	auth.Post("/register", util.WrapFiberHandler(h.Register))
+	auth.Post("/login", util.WrapFiberHandler(h.Login))
+
+	auth.Get("/profile", util.WrapFiberHandler(h.Profile))
+	auth.Patch("/profile", util.WrapFiberHandler(h.UpdateProfile))
+
++	auth.Post("/refresh", util.WrapFiberHandler(h.RefreshToken))
+}
+```
+
+- อัพเดท public route policy
+
+```diff
+p, (admin)|(user), /api/v1/auth/profile, GET
+p, admin, /api/v1/users, (GET)|(POST)
+p, admin, /api/v1/users/*, (GET)|(PATCH)|(DELETE)
+
+p2, /api/v1/auth/register, POST
+p2, /api/v1/auth/login, POST
++p2, /api/v1/auth/refresh, POST
+```
+
+- ทดสอบ Refresh Token
+
+```bash
+curl -XPOST \
+-H "Content-type: application/json" \
+-d '{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NjIyODY5NzQsImlhdCI6MTY1OTY5NDk3NCwic3ViIjoiYjQ0MDAxZDgtMjY0NC00YzkwLTlhZGQtMTM1ZDBlNzJkMWU4In0.pDPUk7sOxQhs2m165cBiZhhCYM_AapFhPX2hRD3ZmIU"
+}' \
+'http://localhost:8080/api/v1/auth/refresh'
+
+// Output
+{
+  "status": 200,
+  "data": {
+    "auth": {
+      "access_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJlbWFpbCI6InVzZXJAbWFpbC5jb20iLCJleHAiOjE2NTk2OTU0NzMsImlhdCI6MTY1OTY5NTE3Mywicm9sZSI6InVzZXIiLCJzdWIiOiI4MDQxMmIyYy1lYTE5LTQ5ODgtYjYwNC1jOTBiY2I2NWUwY2QiLCJ1c2VyX2lkIjoiYTVjZWJlMTAtNzRkOS00MmUwLWI0YjYtMjM2YzM4MDVmNmJhIn0.0WAlZgBCxQVvDm-O2MLzyiGncmZ9jthqUM3I8UGnZfY",
+      "access_token_expires": "2022-08-05T17:31:13.4711998+07:00",
+      "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NjIyODcxNzMsImlhdCI6MTY1OTY5NTE3Mywic3ViIjoiODA0MTJiMmMtZWExOS00OTg4LWI2MDQtYzkwYmNiNjVlMGNkIn0.nSOwKTrhl0AwPMaHXqKPguzUUPd9PubMEHE1gZc1kds",
+      "refresh_token_expires": "2022-09-04T17:26:13.4693386+07:00"
+    }
+  },
+  "requestId": "c9709cd6-c5de-475f-b302-6cc117469981"
+}
+```
+
+### สร้าง API สำหรับสร้าง Revoke Token
+
+เพิ่มให้สามารถทำการ Logout ออกจากระบบได้ โดยส่ง refresh token แล้วทำการลบออกจาก Redis ซึ่งจะทำให้ในขั้นตอนการ Refresh Token จะหาข้อมูลไม่เจอ ทำให้ไม่สามารถออก token ใหม่ได้
+
+- เริ่มจากสร้าง RefreshToken Service
+
+```diff
+type AuthService interface {
+	Register(form dto.RegisterForm, reqId string) error
+	Login(form dto.LoginForm, reqId string) (*dto.AuthResponse, error)
+	Profile(email string, reqId string) (*dto.UserInfo, error)
+	UpdateProfile(email string, form dto.UpdateProfileForm, reqId string) (*dto.UserInfo, error)
+	RefreshToken(form dto.RefreshForm, reqId string) (*dto.AuthResponse, error)
++	RevokeToken(form dto.RefreshForm, reqId string) error
+}
+```
+
+- การทำงาน คือ จะรับ refresh token มาและเอา tokenId ไปลบออกจาก Redis ออกมา
+
+```go
+func (s authService) RevokeToken(form dto.RefreshForm, reqId string) error {
+	// validate form
+	err := common.ValidateDto(form)
+	if err != nil {
+		return common.NewInvalidError(err.Error())
+	}
+
+	// ตรวจสอบ refresh token ว่ายัง valid หรือไม่
+	cliams, err := util.ValidateToken(form.Token, s.config.Token.RefreshSecretKey)
+
+	if err != nil {
+		logger.ErrorWithReqId(err.Error(), reqId)
+		return ErrInvalidRefreshToken
+	}
+
+	// เอา token id ไปหาใน redis
+	tokenId := cliams["sub"].(string)
+	s.tokenRepo.DeleteToken(tokenId)
+
+	return nil
+}
+```
+
+- สร้าง Handler สำหรับ Refresh Token
+
+```go
+type AuthHandler interface {
+	Register(common.HContext) error
+	Login(c common.HContext) error
+	Profile(c common.HContext) error
+	UpdateProfile(c common.HContext) error
+	RefreshToken(c common.HContext) error
+  RevokeToken(c common.HContext) error
+}
+
+// @Summary Revoke Token
+// @Description Remove token id in redis
+// @Tags Auth
+// @Accept  json
+// @Produce  json
+// @Param user body swagger.RefreshForm true "Refresh Token Data"
+// @Failure 401 {object} swagdto.Error401
+// @Failure 422 {object} swagdto.Error422{error=swagger.ErrLoginSampleData}
+// @Failure 500 {object} swagdto.Error500
+// @Success 204
+// @Router /auth/revoke [post]
+func (h authHandler) RevokeToken(c common.HContext) error {
+	// แปลง JSON เป็น struct
+	form := new(dto.RefreshForm)
+	if err := c.BodyParser(form); err != nil {
+		return common.ResponseError(c, common.ErrBodyParser)
+	}
+	// ส่งต่อไปให้ service ทำงาน
+	err := h.serv.RevokeToken(*form, c.RequestId())
+	if err != nil {
+		// error จะถูกจัดการมาจาก service แล้ว
+		return common.ResponseError(c, err)
+	}
+
+	return common.ResponseNoContent(c)
+}
+```
+
+- สร้าง Route ใหม่
+
+```diff
+func SetupRoutes(cfg RouteConfig) {
+	h := handler.NewAuthHandler(cfg.AuthService)
+
+	auth := cfg.Router.Group(cfg.BaseURL + "/auth")
+
+	auth.Post("/register", util.WrapFiberHandler(h.Register))
+	auth.Post("/login", util.WrapFiberHandler(h.Login))
+
+	auth.Get("/profile", util.WrapFiberHandler(h.Profile))
+	auth.Patch("/profile", util.WrapFiberHandler(h.UpdateProfile))
+
+	auth.Post("/refresh", util.WrapFiberHandler(h.RefreshToken))
++ auth.Post("/revoke", util.WrapFiberHandler(h.RevokeToken))
+}
+```
+
+- อัพเดท public route policy
+
+```diff
+p, (admin)|(user), /api/v1/auth/profile, GET
+p, admin, /api/v1/users, (GET)|(POST)
+p, admin, /api/v1/users/*, (GET)|(PATCH)|(DELETE)
+
+p2, /api/v1/auth/register, POST
+p2, /api/v1/auth/login, POST
+p2, /api/v1/auth/refresh, POST
++p2, /api/v1/auth/revoke, POST
+```
+
+- ทดสอบ Revoke Token
+
+```bash
+curl -XPOST \
+-H "Content-type: application/json" \
+-d '{
+  "refresh_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE2NjIyODgxNTcsImlhdCI6MTY1OTY5NjE1Nywic3ViIjoiOWU1MmZkOTItZGMwZC00NmNjLTlhYjctYzdjYzcwYjliNDMwIn0.kifRJhUl73FjfjP8o5jqu6h6c9zk_U6ZguOPRSjGKXs"
+}' \
+'http://localhost:8080/api/v1/auth/revoke'
+
+// Output
+HTTP/1.1 204 No Content
+```
+
+## สรุป
+
+**Access Token** คือ token ที่แนบไปกับทุก request เพื่อใช้ยืนยันตัวตน และต้องมีอายุสั้นๆ เช่น 5 - 60 นาที
+
+**Refresh Token** คือ token ที่เอาไว้ใช้สร้าง Access Token ใหม่ แทนการ Login ซึ่งมีอายุยาวๆ เช่น 7 - 30 วัน
+
+สามารถดูโค้ดได้[ที่นี่](https://github.com/somprasongd/blog-code/tree/main/golang/goapi-access-refresh-token)

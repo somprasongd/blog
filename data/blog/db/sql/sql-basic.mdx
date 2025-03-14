@@ -1,0 +1,519 @@
+---
+title: 'SQL เบื้องต้น'
+date: '2023-03-10'
+lastmod: '2023-03-10'
+tags: ['database', 'sql', 'postgres']
+draft: false
+summary: 'SQL เบื้องต้น'
+---
+
+# SQL เบื้องต้น
+
+ช่วงที่ผ่านมาได้เข้าไปแก้โปรเจค backend ของน้องๆ ซึ่งทุกโปรเจคจะใช้งาน ORM ทั้งหมด การจากสอบถามพบว่าสาเหตุที่เรื่องใช้งาน ORM นั้น ก็เพราะว่าไม่ถนัด SQL หรือไม่ก็เขียนไม่ได้เลย
+
+ซึ่ง ORM ก็สะดวกดี แต่เมื่อต้องการคิวรี่ที่ซับซ้อน ส่วนตัวรู้สึกว่ามันค่อนข้างช้ากว่าการเขียนคำสั่ง SQL แถมใช้เวลาเยอะมากับการพยายามเรียกใช้ฟังก์ชันของ ORM เพื่อให้ได้ผลลัพธ์อย่างที่เราต้องการ
+
+จึงอยากมาแชร์คำสั่ง SQL ที่คิดว่าได้ใช้ง่ายอยู่บ่อยๆ
+
+## เริ่มจากเตรียมสิ่งที่ต้องใช้ก่อน
+
+- ติดตั้ง [PostgreSQL](https://somprasongd.work/blog/db/postgres/install-with-docker)
+
+  ```bash
+  # Install PostgreSQL Version 15
+  $ docker run \
+    --name pg-15 \
+    -p 5432:5432 \
+    --restart always \
+    -e POSTGRES_USER=postgres \
+    -e POSTGRES_PASSWORD=pgpasswd \
+    -v pg-15:/var/lib/postgresql/data \
+    -d postgres:15
+  ```
+
+- เตรียมฐานข้อมูล
+
+  ```bash
+  $ docker exec -it pg-15 bash
+
+  # ติดตั้ง wget
+  root@b3e5dae8d31f:/# apt update && apt install -y wget
+
+  # download Chinook_PostgreSql.sql
+  root@b3e5dae8d31f:/# wget https://raw.githubusercontent.com/lerocha/chinook-database/master/ChinookDatabase/DataSources/Chinook_PostgreSql.sql
+
+  # สร้างฐานข้อมูลใหม่ชื่อ chinook
+  root@b3e5dae8d31f:/# createdb -U postgres chinook
+
+  # นำเข้าฐานข้อมูลตั้งต้น
+  root@b3e5dae8d31f:/# psql -U postgres chinook < Chinook_PostgreSql.sql
+  ```
+
+## SQL คืออะไร
+
+SQL ย่อมาจาก Structured Query Language แยกแต่ละคำออกมาดู
+
+- Structured Data คือ ข้อมูลที่มีโครงสร้างชัดเจน ที่แสดงผลในรูปแบบของตารางได้ (Row&Column)
+- Query แปลว่า สอบถาม
+  สรุปว่า SQL คือ เป็นภาษาที่เอาไว้เขียนคำสั่งไปติดต่อฐานข้อมูลแบบ Relational Database ซึ่งแบ่งเป็นกลุ่มของคำสั่งได้ตามรูปด้านล่างนี้
+
+  <div className="flex justify-center">
+    <div>![sql basic](/static/images/db/sql/basic/sql-commands.png)</div>
+  </div>
+
+  รูปจาก [https://www.geeksforgeeks.org/sql-ddl-dml-tcl-dcl/](https://www.geeksforgeeks.org/sql-ddl-dml-tcl-dcl/)
+
+  ที่ใช้บ่อยๆ ก็จะเป็นกลุ่ม DDL กับ DML ซึ่งมี Flow การใช้งานตามภาพด้านล่างนี้
+
+  <div className="flex justify-center">
+    <div>![sql basic](/static/images/db/sql/basic/flow.png)</div>
+  </div>
+
+  ตารางก็คือที่จัดเก็บข้อมูลมีโครงสร้างเป็น Column กับ Row
+
+  <div className="flex justify-center">
+    <div>![sql basic](/static/images/db/sql/basic/table.png)</div>
+  </div>
+
+  ซึ่งใน 1 ฐานข้อมูลสามารถมีได้หลายตาราง และแต่ละตารางสามารถมี Relational ระหว่างกันได้
+
+  <div className="flex justify-center">
+    <div>![sql basic](/static/images/db/sql/basic/relational.png)</div>
+  </div>
+
+## Basic SQL Commands
+
+ในส่วนของ Developer ที่ใช้งานบ่อยๆ ก็จะเป็น `SELECT, INSERT, UPDATE, DELETE`
+
+### Select Clause
+
+ใช้สำหรับดึงข้อมูลออกมาตาราง
+
+- การดึงข้อมูลทั้งหมดออกมา
+
+  ```sql
+  -- * คือ บอกว่าเอาทุก Columns
+  select * from "Customer";
+  ```
+
+  <div className="flex justify-center">
+    <div>![sql basic](/static/images/db/sql/basic/all-col.png)</div>
+  </div>
+
+- ถ้าต้องการแค่บาง Column ทำได้โดยการเปลี่ยนจาก \* ไปเป็น ชื่อ `Column1, Column2, … ColumnN`
+
+  ```sql
+  -- Specific Columns
+  select
+  "FirstName",
+  "LastName",
+  "Country",
+  "Email"
+  from "Customer";
+  ```
+
+  <div className="flex justify-center">
+    <div>![sql basic](/static/images/db/sql/basic/specific-col.png)</div>
+  </div>
+
+- ถ้าข้อมูลมีจำนวนเยอะๆ จะทำให้แสดงข้อมูลได้ช้า เราสามารถกำหนดจำนวน Row ที่ต้องการได้
+
+  ```sql
+  -- Limit
+  select
+  "FirstName",
+  "LastName",
+  "Country",
+  "Email"
+  from "Customer"
+  limit 5;
+  ```
+
+- เมื่อเรากำหนดการดึงข้อมูลเอาไว้ เช่น `LIMIT 5` มันจะได้ 5 rows แรกเสมอ ถ้าต้องการดึงข้อมูลถัดไปจะต้องเพิ่ม `OFFSET` เอาไว้บอกว่าต้องการให้ข้ามข้อมูลไปกี่ rows เช่น ต้องข้อมูลตัวที่ 6 - 10 ทำได้โดย
+
+  ```sql
+  -- Limit
+  select
+  "FirstName",
+  "LastName",
+  "Country",
+  "Email"
+  from "Customer"
+  limit 5
+  offset 5; -- page 2 -> skip 5 แถวแรก
+
+  -- page 1 0-4     offset 0
+  -- page 2 5-9     offset 5  (0-4)
+  -- page 3 10-14   offset 10 (0-9)
+  ```
+
+- เราสามารถ Merge Columns เข้าด้วยกันได้ โดยใช้ `||` เอาสร้างชื่อจริงจาก `FirstName` กับ `LastName`
+
+  ```sql
+  -- Merge Columns with ||
+  select
+  "FirstName",
+  "LastName",
+  "FirstName" || ' ' || "LastName"
+  from "Customer";
+  ```
+
+  <div className="flex justify-center">
+    <div>![sql basic](/static/images/db/sql/basic/merge.png)</div>
+  </div>
+
+- เมื่อรันคำสั่งจะเห็นว่าชื่อ Column จะแสดงเป็น ?column? เราสามารถตั้งชื่อให้มันได้โดยใช้ `AS`
+
+  ```sql
+  -- Using as
+  select
+  "FirstName",
+  "LastName",
+  "FirstName" || ' ' || "LastName" as "FullName"
+  from "Customer";
+  ```
+
+  <div className="flex justify-center">
+    <div>![sql basic](/static/images/db/sql/basic/as.png)</div>
+  </div>
+
+- บางครั้งข้อมูลที่จะดึงออกมาจะต้องมีการแปลงค่าการนำไปใช้งาน สามารถเขียนเป็น IF-ELSE ได้ด้วยการใช้ `CASE WHEN THEN ELSE END`
+
+  ```sql
+  -- case when
+  select
+  "FirstName" || ' ' || "LastName" as "FullName",
+  "Company",
+  case when "Company" is null
+  	then 'End Customer'
+  	else 'Corperate'
+  end as "Segment"
+  from "Customer";
+  ```
+
+### Where Clause
+
+ปกติแล้วเราไม่ได้ต้องการข้อมูลทั้งหมด จะต้องมีการ filter ข้อมูลตามที่ต้องการออกมา ทำได้โดยการใช้ `WHERE` เช่น
+
+```sql
+-- ดึงเฉพาะลูกค้าที่อยู่ในประเทศ USA
+select * from "Customer"
+where "Country" = 'USA';
+
+-- ดึงเฉพาะลูกค้าที่ไม่ได้อยู่ในประเทศ USA
+select * from "Customer"
+where "Country" <> 'USA';
+```
+
+เครื่องหมาย `=, <>` คือ **Logical Operators** ซึ่งมีให้ใช้ดังนี้
+
+| Logical Operator | ความหมาย        |
+| ---------------- | --------------- |
+| `=`              | เท่ากับ         |
+| `>`              | มากกว่า         |
+| `<`              | น้อยกว่า        |
+| `>=`             | มากกว่าเท่ากับ  |
+| `<=`             | น้อยกว่าเท่ากับ |
+| `<>`             | ไม่เท่ากับ      |
+
+แต่ข้อมูลที่เป็นค่า `NULL` จะไม่สามารถใช้ `=, <>` ได้ ต้องใช้ `IS NULL, IS NOT NULL` แทน
+
+```sql
+-- NULL
+select * from "Customer"
+where "Company" is null;
+
+-- NOT NULL
+select * from "Customer"
+where "Company" is not null;
+```
+
+เราสามารถเขียนเงื่อนการดึงข้อมูลได้มากกว่า 1 เงื่อนไข โดยใช้
+
+- `and` ต้องเป็นจริงทั้งคู่
+
+  ```sql
+  select * from "Customer"
+  where "Country" = 'USA'
+  and "State" = 'CA';
+  ```
+
+- `or` เงื่อนใดเงื่อนหนึ่งเป็นจริง
+
+  ```sql
+  select * from "Customer"
+  where "Country" = 'USA'
+  or "Country" = 'Canada';
+  ```
+
+- `and` ร่วมกับ `or`
+
+  ```sql
+  select * from "Customer"
+  where "Country" = 'USA'
+  and ("State" = 'CA' or "State" = 'NY');
+  ```
+
+การค้นหาข้อมูลจาก pattern matching โดยการใช้ `LIKE`
+
+- หาข้อมูลแค่ 1 ตัวอักษร ใช้ `_`
+
+  ```sql
+  select * from "Customer"
+  where "FirstName" like 'T_m';
+  ```
+
+- หาข้อมูลที่ขึ้นต้นด้วยคำที่กำหนด ซึ่งจะต่อท้ายตัวอักษร ≥ 1 ตัว `A%`
+
+  ```sql
+  select * from "Customer"
+  where "FirstName" like 'S%';
+  ```
+
+- หาข้อมูลที่ลงท้ายด้วยคำที่กำหนด ซึ่งจะต่อท้ายตัวอักษร ≥ 1 ตัว `%Z`
+
+  ```sql
+  select * from "Customer"
+  where "Email" like '%gmail.com';
+  ```
+
+- หาว่ามีคำๆ นี้ผสมอยู่หรือไม่ แต่จะเป็นแบบ case sensitive `%Word%`
+
+  ```sql
+  select * from "Customer"
+  where "FirstName" like '%In%';
+  ```
+
+- ถ้าไม่สนใจเรื่อง case sensitive ให้เปลี่ยนมาใช้ `ILIKE` แทน
+
+  ```sql
+  select * from "Customer"
+  where "FirstName" ilike '%In%';
+  ```
+
+### SQL Functions
+
+- **COALESCE function** เอาไว้คืนค่าที่ไม่ค่า `NULL` กลับออกมา ตัวอย่างการใช้งาน เช่น ถ้า `Company` มีค่าเป็น `NULL` ให้เปลี่ยนเป็น `End Customer` แทน
+
+  ```sql
+  select
+  "Company",
+  coalesce("Company", 'End Customer') as "CleanedCustomer"
+  from "Customer";
+  ```
+
+- **Aggregate functions** เอาไว้ใช้หาข้อมูลทางสถิติ
+
+  | Aggregate functions | ใช้ทำอะไร             |
+  | ------------------- | --------------------- |
+  | AVG                 | หาค่าเฉลี่ย           |
+  | SUM                 | หาผลรวม               |
+  | MIN                 | หาค่าต่ำที่สุด        |
+  | MAX                 | หาค่าสูงที่สุด        |
+  | COUNT               | นับจำนวน rocords/rows |
+
+  **ตัวอย่างการใช้งาน**
+
+  ```sql
+  select
+  avg("Bytes") as avg_bytes,
+  sum("Bytes") as sum_bytes,
+  min("Bytes") as min_bytes,
+  max("Bytes") as max_bytes,
+  count("Bytes") as total_bytes
+  from "Track";
+  ```
+
+  **ข้อควรระวัง** การใช้ Aggregate functions คือ มันจะไม่สนใจข้อมูลที่เป็นค่า NULL เช่น การนับจำนวน จำนวนเฉพาะตัวที่มีค่าไม่ใช้ `NULL`
+
+  ```sql
+  select
+  count(*), -- ได้ 36
+  count("Company") -- ได้ 5
+  from "Customer";
+  ```
+
+  **GROUP BY** จะต้องใช้คู่กับ \***\*Aggregate functions `(AVG,SUM,MIN,MAX,COUNT)` เสมอ \*\***และมีการดึง SELECT Column อื่นออกมาด้วย เราจะต้องเอา columns อื่น ทั้งหมด มาใส่ใน `GROUP BY`
+
+  ```sql
+  select
+  "Country" ,
+  count(*) as n
+  from "Customer"
+  group by
+  "Country" ;
+  ```
+
+  **HAVING** จะต้องใช้หลัง GROUP BY เท่านั้น ใช้สำหรับเป็นเงื่อนไขเพิ่มเติมจากการ `GROUP BY` ซึ่งจะต่างจาก `WHERE` ที่ใช้เป็นเงื่อนไขของตาราง
+
+  ```sql
+  select
+  "Country" ,
+  count(*) as n
+  from "Customer"
+  group by
+  "Country"
+  having
+  count(*) > 5;  -- ดึงเฉพาะประเทศที่มีจำนวนมากกว่า 5 เท่านั้น
+  ```
+
+### Order By
+
+ใช้สำหรับเรียงข้อมูล โดยค่าเริ่มต้นจะเรียงจากค่าน้อยไปมาก เช่น A → Z ซึ่งการใช้งานจะต้องใช้หลังสุด คือ อยู่หลัง `WHERE, GROUP BY, HAVING`
+
+```sql
+select * from "Customer"
+order by "FirstName";
+```
+
+ถ้าต้องการเรียงจาก มากไปน้อย Z → A ให้เพิ่ม `DESC` เข้าไป
+
+```sql
+select * from "Customer"
+order by "FirstName" desc;
+```
+
+### JOINS
+
+ใช้สำหรับการเชื่อมตารางที่มีความสัมพันธ์การ ซึ่งมีรูปแบบการ JOINS ทั้งหมด ดังภาพด้านล่าง
+
+<div className="flex justify-center">
+  <div>![sql basic](/static/images/db/sql/basic/joins.png)</div>
+</div>
+
+รูปจาก [https://www.techagilist.com/mainframe/db2/db2-join-inner-joins-and-outer-joins/](https://www.techagilist.com/mainframe/db2/db2-join-inner-joins-and-outer-joins/)
+
+แต่ที่ใช้บ่อยที่สุดคือ
+
+- Inner Join คือ เอาข้อมูลที่ทั้ง 2 ตาราง มีเหมือนกัน
+
+  <div className="flex justify-center">
+    <div>![sql basic](/static/images/db/sql/basic/inner-join.png)</div>
+  </div>
+
+  ````sql select "Artist"."ArtistId", "Artist"."Name", "Album"."Title" from "Album" inner join "Artist"
+  ON "Artist"."ArtistId" = "Album"."ArtistId"; ``` เราสามารถตั้งชื่อย่อให้กับชื่อตารางได้ ดังนี้ ```sql
+  select ar."ArtistId", ar."Name", al."Title" from "Album" al inner join "Artist" ar ON ar."ArtistId"
+  = al."ArtistId"; ```
+
+  ````
+
+- [Inclusive] Left Join คือ เอาข้อมูลจากตารางทางซ้ายเป็นหลัก ถ้าทางขวาไม่มีข้อมูลจะมีค่าเป็น NULL
+
+  <div className="flex justify-center">
+    <div>![sql basic](/static/images/db/sql/basic/left-join.png)</div>
+  </div>
+
+  ````sql select ar."ArtistId", ar."Name", al."Title" from "Album" al left join "Artist" ar ON ar."ArtistId"
+  = al."ArtistId" order by ar."ArtistId" ; ```
+  ````
+
+### Insert Clause
+
+ใช้สำหรับเพิ่มข้อมูลใหม่ลงไปในตาราง มีรูปแบบคำสั่งคือ
+
+```sql
+INSERT INTO table_name (column1, column2, column3, ...)
+VALUES (value1, value2, value3, ...);
+```
+
+**ตัวอย่าง** ถ้าต้องการเพิ่มข้อมูลใหม่ไปในตาราง Employee ทำได้โดย
+
+```sql
+insert into "Employee"
+("EmployeeId", "FirstName", "LastName")
+values
+(9, 'Somprasong', 'Damyos');
+```
+
+ภาพการเปลี่ยนแปลง
+
+<div className="flex justify-center">
+  <div>![sql basic](/static/images/db/sql/basic/insert.png)</div>
+</div>
+
+### Update Clause
+
+ใช้สำหรับแก้ข้อมูลในตาราง มีรูปแบบคำสั่งคือ
+
+```sql
+UPDATE table_name
+SET column1 = value1, column2 = value2, ...
+WHERE condition;
+```
+
+**ตัวอย่าง** อัพเดท รายชื่อพนักงานที่เพิ่งเพิ่มลงไปใหม่ จากขั้นตอนทีแล้ว ซึ่งมี `EmployeeId = 9`
+
+```sql
+update "Employee" set
+"Title" = 'Developer'
+where "EmployeeId" = 9;
+```
+
+ภาพการเปลี่ยนแปลง
+
+<div className="flex justify-center">
+  <div>![sql basic](/static/images/db/sql/basic/update.png)</div>
+</div>
+
+**Trick** ที่อยากแนะนำ เมื่อเอา SQL ไปเขียนไว้ในโค้ด และต้องการให้อัพเดทค่าเมื่อ parameter ที่ส่งเข้ามานั้น มีค่า คือต้อง `NOT NULL` โดยการเอา `COALESCE()` มาช่วย
+
+```sql
+update "Employee" set
+"FirstName" = coalesce($2, "FirstName"), -- ถ้า $2 เป็น null จะเอาค่าเดิมในฐานมาอัพเดท
+"LastName" = coalesce($3, "LastName"), -- ถ้า $3 เป็น null จะเอาค่าเดิมในฐานมาอัพเดท
+"Title" = coalesce($4, "Title") -- ถ้า $4 เป็น null จะเอาค่าเดิมในฐานมาอัพเดท
+where "EmployeeId" = $1;
+```
+
+### Delete Clause
+
+ใช้สำหรับลบข้อมูลออกจากตาราง มีรูปแบบคำสั่งคือ
+
+```sql
+DELETE FROM table_name WHERE condition;
+```
+
+**ตัวอย่าง** ต้องการลบข้อมูลพนักงานที่เพิ่งเพิ่มเข้าไปออก
+
+```sql
+delete from "Employee" where "EmployeeId" = 9;
+```
+
+### Virtual Table (View)
+
+บางเรามีชุดคำสั่ง SELECT ที่ต้องใช้งานบ่อยๆ หรือต้องดึงข้อมูลที่มีโครงสร้างต่างจากที่เก็บไว้ในตาราง เราสามารถเอาชุดคำสั่งนั้น มาสร้างเป็น Virtual Table เพื่อให้เรียกใช้งานได้สะดวกขึ้น โดยการสร้าง View ซึ่งมีรูปแบบคำสั่ง คือ
+
+```sql
+CREATE VIEW view_name AS
+SELECT column1, column2, ...
+FROM table_name
+WHERE condition;
+```
+
+**ตัวอย่าง** ถ้าต้องการสร้าง View สำหรับดึงข้อมูลลูกค้าองค์กร
+
+การสร้าง View ใหม่
+
+```sql
+create view corperate_customers as
+select *
+from "Customer"
+where "Company" is not null;
+```
+
+การเรียกใช้งาน
+
+```sql
+select * from corperate_customers;
+
+# สามารถ Filter ข้อมูลได้
+select * from corperate_customers
+where "Country" = 'USA';
+```
+
+การลบ View
+
+```sql
+drop view corperate_customers;
+```

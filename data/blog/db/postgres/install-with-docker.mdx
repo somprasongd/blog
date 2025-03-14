@@ -1,0 +1,199 @@
+---
+title: 'ติดตั้ง PostgreSQL ด้วย Docker'
+date: '2023-03-09'
+tags: ['postgres', 'database']
+draft: false
+summary: 'ติดตั้ง PostgreSQL ด้วย Docker'
+---
+
+# ติดตั้ง PostgreSQL ด้วย Docker
+
+แนะนำวิธีการติดตั้ง PostgreSQL ด้วย Docker และวิธีการใช้งานเบื้องต้น
+
+**เนื้อหาในบทความนี้**
+
+- การติดตั้ง PostgreSQL
+- การใช้งาน PostgreSQL Command Line เบื้องต้น
+- การ Backup & Restore
+- Database IDE
+
+## การติดตั้ง PostgreSQL
+
+ในบทความนี้จะใช้วิธีการติดตั้งผ่าน Docker ซึ่งสามารถติดตั้งได้โดยใช้คำสั่งนี้
+
+```bash
+# Install PostgreSQL Version 15
+$	docker run \
+    --name pg-15 \
+    -p 5432:5432 \
+    --restart always \
+    -e POSTGRES_USER=postgres \
+    -e POSTGRES_PASSWORD=pgpasswd \
+    -e POSTGRES_DB=my-db \
+    -v pg-15:/var/lib/postgresql/data \
+    -d postgres:15
+
+# -e POSTGRES_USER=postgres คือ กำหนด username โดยใช้ว่า postgres
+# -e POSTGRES_PASSWORD=pgpasswd คือ กำหนดรหัสผ่านสำหรับ username นี้ โดยตั้งว่า pgpasswd
+# -e POSTGRES_DB=my-db คือ บอกให้ postgres สร้างฐานข้อมูลชื่อ my-db ให้เมื่อรัน server ขึ้นมา
+# -v pg-15:/var/lib/postgresql/data คือ มีการ bind mount volumn ที่เก็บฐานข้อมูลไว้ออกว่าไว้ที่เครื่อง host
+```
+
+ถ้าต้องการหยุดการทำงานของ PostgreSQL Server ให้รันคำสั่งนี้
+
+```bash
+# Stop PostgreSQL Server
+$ docker stop pg-15
+```
+
+ถ้าต้องการลบออกไปให้รันคำสั่งนี้
+
+```bash
+# Uninstall PostgreSQL Server & Remove All data
+$ docker rm pg-15 &&  \
+  docker volume rm pg-15
+```
+
+เมื่อติดตั้งสำเร็จแล้ว สามารถเข้าไปใช้งาน PostgreSQL Server ใน container ได้ดังนี้
+
+```bash
+$ docker exec -it pg-15 bash
+root@76d0962faf39:/#
+```
+
+## การใช้งาน PostgreSQL Command Line เบื้องต้น
+
+เราจะใช้ PostgreSQL Command Line หรือ psql ในการ access เข้าไปสั่งงาน PostgreSQL Server ซึ่งมีวิธีเข้าใช้งาน ดังนี้
+
+```bash
+# -U คือ ระบุว่าจะ login เข้าใช้งานด้วย user อะไร ในตัวอย่าง คือ ใช้ user postgres
+root@76d0962faf39:/# psql -U postgres
+psql (15.2 (Debian 15.2-1.pgdg110+1))
+Type "help" for help.
+
+postgres=#
+```
+
+**คำสั่งสำหรับใช้งานเบื้องต้น**
+
+- `\h`  → แสดง Help
+- `\?` → ดูว่ามี command อะไรให้ใช้งานบ้าง
+- `\q` → ออกจาก psql
+- `SELECT version();` → แสดงว่ากำลังใช้งาน PostgreSQL Version อะไรอยู่
+- `SELECT current_database();` → แสดงชื่อฐานข้อมูลที่เชื่อมต่ออยู่
+- `show config_file;` → แสดงตำแหน่งที่อยู่ของไฟล์ postgresql.conf
+  ```bash
+  postgres=# show config_file;
+                 config_file
+  ------------------------------------------
+   /var/lib/postgresql/data/postgresql.conf
+  (1 row)
+  ```
+- `show hba_file;` → แสดงตำแหน่งที่อยู่ของไฟล์ pg_hba.conf
+  ```bash
+  postgres=# show hba_file;
+                 hba_file
+  --------------------------------------
+   /var/lib/postgresql/data/pg_hba.conf
+  (1 row)
+  ```
+
+**คำสั่งใช้งานบ่อย**
+
+- `CREATE DATABASE new_db WITH ENCODING ‘UTF8';` → สร้างฐานข้อมูลใหม่
+  ```bash
+  postgres=# CREATE DATABASE new_db WITH ENCODING ‘UTF8’;
+  CREATE DATABASE
+  ```
+- `\l` → แสดรายชื่อฐานข้อมูลทั้งหมด
+  ```bash
+  postgres=# \l
+                                                  List of databases
+     Name    |  Owner   | Encoding |  Collate   |   Ctype    | ICU Locale | Locale Provider |   Access privileges
+  -----------+----------+----------+------------+------------+------------+-----------------+-----------------------
+   my-db     | postgres | UTF8     | en_US.utf8 | en_US.utf8 |            | libc            |
+   new_db    | postgres | UTF8     | en_US.utf8 | en_US.utf8 |            | libc            |
+   postgres  | postgres | UTF8     | en_US.utf8 | en_US.utf8 |            | libc            |
+   template0 | postgres | UTF8     | en_US.utf8 | en_US.utf8 |            | libc            | =c/postgres          +
+             |          |          |            |            |            |                 | postgres=CTc/postgres
+   template1 | postgres | UTF8     | en_US.utf8 | en_US.utf8 |            | libc            | =c/postgres          +
+             |          |          |            |            |            |                 | postgres=CTc/postgres
+  (5 rows)
+  ```
+- `\c [database name]` → เชื่อมต่อไปยังฐานข้อมูลที่ระบุ
+  ```bash
+  postgres=# \c new_db
+  You are now connected to database "new_db" as user "postgres".
+  new_db=#
+  ```
+- สร้างตารางใหม่
+  ```bash
+  new_db=# CREATE TABLE "users" (
+  "id" uuid PRIMARY KEY,
+  "username" varchar UNIQUE NOT NULL,
+  "password" varchar NOT NULL,
+  "created_at" timestamp NOT NULL DEFAULT (now())
+  );
+  CREATE TABLE
+  ```
+- `\dt` → แสดงรายชื่อตารางทั้งหมด
+  ```bash
+  new_db=# \dt
+  List of relations
+  Schema | Name | Type | Owner
+  --------+-------+-------+----------
+  public | users | table | postgres
+  (1 row)
+  ```
+- ซึ่งสามารถรันคำสั่ง SQL ทั้ง `SELECT, INSERT, UPDATE, DELETE` ได้เลย โดยเมื่อจบแต่ละคำสั่งต้องปิดท้ายด้วย `;` เสมอ
+
+## การ Backup & Restore
+
+- Backup
+
+  ```bash
+  $ pg_dump -U postgres -E utf8 -Fc expend-db > expend-db.backup
+
+  # -U postgres specifies the username to use when connecting to the database. In this case, it is set to "postgres".
+
+  # -Fc specifies the format of the backup file to be the custom binary format created by pg_dump.
+
+  # expend-db is the name of the database that you want to back up.
+
+  # > expend-db.dump redirects the output of pg_dump to a file called "expend-db.dump".
+  ```
+
+- Restore
+
+  ```bash
+  $ pg_restore -U postgres -d expend-db expend-db.backup
+
+  # -U postgres specifies the username to use when connecting to the database. In this case, it is set to "postgres".
+
+  # -d expend-db specifies the name of the database that you want to restore.
+
+  # expend-db.dump is the name of the backup file that you want to restore from.
+  ```
+
+### Database IDE
+
+Database IDE สำหรับ PostgreSQL นั้นมีหลายตัวมาก แต่ส่วนใหญ่ที่ใช้งานจะใช้อยู่ 2 ตัว คือ
+
+1. [pgAdmin](https://www.pgadmin.org/) ใช้งานผ่าน Browser สามารถติดตั้งโดยใช้ Docker ได้ดังนี้
+
+   ```bash
+   $ docker run \
+    -p 5000:80 \
+    --restart always \
+    --link pg-15 \
+    -e PGADMIN_CONFIG_CONSOLE_LOG_LEVEL=10 \
+    -e PGADMIN_CONFIG_ENHANCED_COOKIE_PROTECTION=True \
+    -e PGADMIN_DEFAULT_EMAIL=admin@domain.com \
+    -e PGADMIN_DEFAULT_PASSWORD=pgapasswd \
+    -v pga_data:/var/lib/pgadmin \
+    -d dpage/pgadmin4:6.20
+   ```
+
+   เข้าใช้งานผ่าน [http://localhost:5000](http://localhost:5000) โดยการเชื่อมต่อสามารถกำหนดให้ host มีค่าเท่ากับ `pg-15` ซึ่งเป็นชื่อ container ของ PostgreSQL Server
+
+2. [DBeaver](https://dbeaver.io/) ตัวนี้ Universal Database Tool รองรับได้หลายระบบฐานข้อมูล สามารถโหลดมาติดตั้งที่เครื่องของตัวเองได้
