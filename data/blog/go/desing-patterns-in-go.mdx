@@ -666,7 +666,8 @@ type Notifier interface {
 type BasicNotifier struct{}
 
 func (n *BasicNotifier) Send(message string) {
-	fmt.Println("Sending message:", message)
+	// จำลองการทำงาน
+	fmt.Println("Sending message")
 }
 
 // LoggingDecorator (Decorator)
@@ -714,7 +715,7 @@ func main() {
 
 ```go
 [Log] Message: Encrypted(Hello, World!)
-Sending message: Encrypted(Hello, World!)
+Sending message
 ```
 
 ---
@@ -806,20 +807,20 @@ func main() {
 
 ```
 Worker 3 กำลังประมวลผลงาน 1
-Worker 2 กำลังประมวลผลงาน 3
 Worker 1 กำลังประมวลผลงาน 2
-Worker 3 จบการทำงาน 1
-Worker 3 กำลังประมวลผลงาน 4
-Worker 3 จบการทำงาน 4
-Worker 3 กำลังประมวลผลงาน 5
+Worker 2 กำลังประมวลผลงาน 3
 Worker 2 จบการทำงาน 3
+Worker 2 กำลังประมวลผลงาน 4
+Worker 2 จบการทำงาน 4
+Worker 2 กำลังประมวลผลงาน 5
+Worker 2 จบการทำงาน 5
+Worker 3 จบการทำงาน 1
 Worker 1 จบการทำงาน 2
-Worker 3 จบการทำงาน 5
-ผลลัพธ์: 2
-ผลลัพธ์: 8
 ผลลัพธ์: 6
-ผลลัพธ์: 4
+ผลลัพธ์: 8
 ผลลัพธ์: 10
+ผลลัพธ์: 2
+ผลลัพธ์: 4
 ```
 
 ---
