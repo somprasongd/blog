@@ -1,0 +1,161 @@
+---
+title: 'Scope ของตัวแปรใน Go'
+date: '2025-03-19'
+lastmod: '2025-03-19'
+tags: ['go']
+draft: false
+summary: 'Scope (ขอบเขตของตัวแปร) ใน Go หมายถึง ขอบเขตที่ตัวแปรสามารถเข้าถึงและใช้งานได้'
+---
+
+# Scope ของตัวแปรใน Go
+
+Scope (ขอบเขตของตัวแปร) ใน Go หมายถึง ขอบเขตที่ตัวแปรสามารถเข้าถึงและใช้งานได้
+
+มี 3 ประเภทหลัก ๆ ได้แก่
+
+1. [**Package Scope**](#1-package-scope)
+2. [**Function Scope**](#2-function-scope)
+3. [**Block Scope**](#3-block-scope)
+
+---
+
+## **1. Package Scope**
+
+ตัวแปรที่ถูกประกาศ นอกฟังก์ชันใด ๆ จะสามารถเข้าถึงได้จากทุกที่ในไฟล์เดียวกัน และไฟล์อื่นที่อยู่ในแพ็กเกจเดียวกัน
+
+ชื่อตัวแปรขึ้นต้นด้วย ตัวพิมพ์ใหญ่ (`Exported`) สามารถถูกเรียกใช้จากแพ็กเกจอื่นได้
+
+ชื่อตัวแปรขึ้นต้นด้วย ตัวพิมพ์เล็ก (`Unexported`) จะใช้ได้เฉพาะในแพ็กเกจเดียวกัน
+
+**ตัวอย่าง:**
+
+```go
+package main
+
+import "fmt"
+
+// ตัวแปรระดับแพ็กเกจ
+var GlobalVar = "I am visible everywhere in this package"
+var localVar = "I am visible only within this package"
+
+func main() {
+    fmt.Println(GlobalVar) // ✅ ใช้งานได้
+    fmt.Println(localVar)  // ✅ ใช้งานได้
+}
+```
+
+✅ `GlobalVar` ใช้งานได้ทุกที่ในแพ็กเกจ (และแพ็กเกจอื่นถ้า import ไป)
+
+✅ `localVar` ใช้งานได้เฉพาะภายในแพ็กเกจนี้
+
+---
+
+## **2. Function Scope**
+
+ตัวแปรที่ถูกประกาศ ภายในฟังก์ชัน จะสามารถใช้งานได้เฉพาะในฟังก์ชันนั้นเท่านั้น
+
+**ตัวอย่าง:**
+
+```go
+package main
+
+import "fmt"
+
+func sayHello() {
+    var message = "Hello, Go!"
+    fmt.Println(message) // ✅ ใช้งานได้ภายในฟังก์ชัน
+}
+
+func main() {
+    sayHello()
+    // fmt.Println(message) ❌ Error: ใช้ตัวแปร message ที่อยู่นอก scope ไม่ได้
+}
+```
+
+✅ `message` ใช้ได้เฉพาะภายใน `sayHello()`
+
+---
+
+## **3. Block Scope (ขอบเขตระดับบล็อก)**
+
+ตัวแปรที่ถูกประกาศ ภายใน `{}` จะสามารถใช้งานได้เฉพาะในบล็อกนั้นเท่านั้น
+
+**ตัวอย่าง Block Scope ใน if:**
+
+```go
+package main
+
+import "fmt"
+
+func main() {
+    if true {
+        var x = 100
+        fmt.Println(x) // ✅ ใช้งานได้ภายใน if-block
+    }
+    // fmt.Println(x) ❌ Error: x ใช้ได้เฉพาะใน if-block เท่านั้น
+}
+```
+
+✅ `x` ใช้ได้ภายใน `{}` ของ `if` เท่านั้น
+
+**ตัวอย่าง Block Scope ใน Loop:**
+
+```go
+package main
+
+import "fmt"
+
+func main() {
+    for i := 1; i <= 3; i++ {
+        fmt.Println(i) // ✅ ใช้งานได้ภายใน for-loop
+    }
+    // fmt.Println(i) ❌ Error: i ใช้ได้เฉพาะใน loop เท่านั้น
+}
+```
+
+✅ `i` ใช้ได้เฉพาะภายใน `for` เท่านั้น
+
+---
+
+## **การใช้ `:=` กับ Scope**
+
+- `:=` ใช้สร้างตัวแปรใหม่ **ภายใน scope ปัจจุบัน**
+- หากตัวแปรมีชื่อซ้ำกับตัวแปรระดับสูงกว่า มันจะสร้างตัวแปรใหม่ใน scope ปัจจุบันแทน
+
+**ตัวอย่าง:**
+
+```go
+package main
+
+import "fmt"
+
+var name = "GoLang"
+
+func main() {
+    fmt.Println(name) // "GoLang"
+
+    name := "Gopher"
+    fmt.Println(name) // "Gopher" (ใช้ตัวแปรใหม่ภายใน main)
+
+    if true {
+        name := "Inside Block"
+        fmt.Println(name) // "Inside Block" (ตัวแปรใหม่ในบล็อก if)
+    }
+
+    fmt.Println(name) // "Gopher" (กลับมาใช้ตัวแปรของ main)
+}
+```
+
+✅ `name` ภายใน `if` เป็นตัวแปรใหม่ที่ไม่กระทบกับ `name` ของ `main`
+
+---
+
+## **สรุป Scope ของตัวแปรใน Go**
+
+| **Scope**          | **ใช้ได้ที่ไหน**                           | **ตัวอย่าง**                         |
+| ------------------ | ------------------------------------------ | ------------------------------------ |
+| **Package Scope**  | ทุกที่ในแพ็กเกจ (และแพ็กเกจอื่นถ้า export) | `var GlobalVar = "..."`              |
+| **Function Scope** | เฉพาะในฟังก์ชันที่ประกาศ                   | `func hello() { var msg = "Hello" }` |
+| **Block Scope**    | เฉพาะใน `{}` เช่น `if`, `for`              | `if true { var x = 10 }`             |
+
+ใช้ Scope ให้เหมาะสม เพื่อป้องกันการชนกันของตัวแปรและทำให้โค้ดอ่านง่ายขึ้น!
