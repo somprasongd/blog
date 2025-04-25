@@ -1,0 +1,302 @@
+---
+title: 'N8N Credentials Setup: จัดให้ครบ จบทุกการเชื่อมต่อ'
+date: '2025-04-25'
+lastmod: '2025-04-25'
+tags: ['n8n']
+draft: false
+summary: 'ตั้งค่า Credentials สำหรับ Gemini API, Gmail, Google Drive และ PostgreSQL ผ่าน Supabase แบบทีละขั้นตอน'
+# images: ['/api/social-image/blog/go/go-fundamentals.jpg']
+---
+
+# N8N Credentials Setup: จัดให้ครบ จบทุกการเชื่อมต่อ
+
+**การสร้าง Credentials คือกุญแจสำคัญที่จะเปิดประตูให้ N8N เชื่อมต่อกับโลกภายนอกได้อย่างมั่นใจ**
+
+บทความนี้จะพาคุณตั้งค่า Credentials สำหรับ Gemini API, Gmail, Google Drive และ PostgreSQL ผ่าน Supabase แบบทีละขั้นตอน ไม่ต้องเดา ไม่ต้องลองผิดลองถูกให้ปวดหัว พร้อมใช้งานได้จริงตั้งแต่ Workflow แรก
+
+## การเชื่อมต่อกับ Gmail และ Google Drive
+
+ต้องเปิดใช้งาน API และสร้าง OAuth 2.0 Client ID ใน Google Cloud ก่อน ซึ่งมีขั้นตอน ดังนี้
+
+### Step 1: เลือก หรือสร้างโปรเจคใหม่
+
+- ไปที่ https://console.cloud.google.com/projectselector2
+- ถ้ายังไม่มี ให้เลือก Create Project เพื่อสร้างใหม่ โดยระบุ
+  - **Project name:** เช่น n8n-dev
+  - ถ้าเป็น Google Workspace จะมี Organization กับ Location มาให้เลือกเพิ่ม
+  - กดปุ่ม **Create**
+    <div className="flex justify-center">
+      <div>![](/static/images/n8n/credential_setup/1.png)</div>
+    </div>
+
+### Step 2: เปิดใช้งาน API
+
+- ให้พิมพ์ค้นหา และเลือก Gmail API
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/2.png)</div>
+  </div>
+- เปิดการใช้งาน เลือก Enable
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/3.png)</div>
+  </div>
+- ให้พิมพ์ค้นหา และเลือก Google Drive API
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/4.png)</div>
+  </div>
+- เปิดการใช้งาน เลือก Enable
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/5.png)</div>
+  </div>
+
+### Step 3: สร้าง OAuth consent screen
+
+ก่อนจะสร้าง OAuth 2.0 Client ID ครั้งแรก จะต้องสร้าง OAuth consent screen ก่อน
+
+- ไปที่ **APIs & Services > OAuth consent screen**
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/6.png)</div>
+  </div>
+- เลือก Get started จะมีให้กรอก Project Information
+  - App Information
+    - ระบุ App name
+    - ระบุ Email
+    - กดปุ่ม Next
+      <div className="flex justify-center">
+        <div>![](/static/images/n8n/credential_setup/7.png)</div>
+      </div>
+  - Audience
+    - ถ้าเลือก External **จะเป็น testing mode ต้องเพิ่ม Test user ด้วย ไม่งั้น login ไม่ได้**
+    - กดปุ่ม Next
+      <div className="flex justify-center">
+        <div>![](/static/images/n8n/credential_setup/8.png)</div>
+      </div>
+  - Contact Information
+    - ใส่อีเมลตัวเอง
+    - กดปุ่ม Next
+      <div className="flex justify-center">
+        <div>![](/static/images/n8n/credential_setup/9.png)</div>
+      </div>
+  - Finish
+    - เลือก I agree to …
+    - กดปุ่ม Continue
+      <div className="flex justify-center">
+        <div>![](/static/images/n8n/credential_setup/10.png)</div>
+      </div>
+  - กดปุ่ม Create
+- กรณีเลือก Audience เป็น External ให้เพิ่มอีเมลตัวเอง เป็น Test user ก่อน
+  - โดยเลือกที่เมนู Audience
+  - กดปุ่ม Add users
+    <div className="flex justify-center">
+      <div>![](/static/images/n8n/credential_setup/11.png)</div>
+    </div>
+  - ใส่ระบุอีเมลของเรา และกดปุ่ม Save
+    <div className="flex justify-center">
+      <div>![](/static/images/n8n/credential_setup/12.png)</div>
+    </div>
+  - เมื่อเสร็จแล้วจะมีชื่ออีเมลของเราเป็น Test user
+    <div className="flex justify-center">
+      <div>![](/static/images/n8n/credential_setup/13.png)</div>
+    </div>
+
+### Step 4: สร้าง OAuth 2.0 Client ID
+
+เมื่อทุกอย่างพร้อมแล้ว ก็เริ่มสร้าง OAuth 2.0 Client ID เพื่อเอาไปใช้งานได้ n8n ได้
+
+- ไปที่ **APIs & Services > Credentials**
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/14.png)</div>
+  </div>
+- เลือก Create credentials และเลือก OAuth client ID
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/15.png)</div>
+  </div>
+- เลือก Application type เป็น Web application
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/16.png)</div>
+  </div>
+- ระบุชื่อ ที่ Name: เช่น n8n-gmail
+- กดปุ่ม Add URI
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/17.png)</div>
+  </div>
+- โดย URI นี้ ต้องเอามาจาก n8n ตัวอย่างการจะเป็นการเพิ่ม Credential ของ Gmail มีขั้นตอนดังนี้
+  - Login เข้า n8n ของเรา
+  - เลือก + แล้วเลือก Credential
+    <div className="flex justify-center">
+      <div>![](/static/images/n8n/credential_setup/18.png)</div>
+    </div>
+  - พิมพ์ค้นหาว่า Gmail แล้วเลือก Gmail OAuth2 API
+    <div className="flex justify-center">
+      <div>![](/static/images/n8n/credential_setup/19.png)</div>
+    </div>
+  - ให้ Copy ที่ OAuth Redirect URL
+    <div className="flex justify-center">
+      <div>![](/static/images/n8n/credential_setup/20.png)</div>
+    </div>
+- นำ URL มาใส่ที่ Authorized redirect URIs
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/21.png)</div>
+  </div>
+- กดปุ่ม Create ก็จะได้ Client ID และ Client secret
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/22.png)</div>
+  </div>
+- นำมาใส่ใน หน้าการเชื่อมต่อของ n8n
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/23.png)</div>
+  </div>
+- กดปุ่ม Sign in with Google เพื่อทำการ sign in โดยเลือกบัญชีให้ถูกต้อง
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/24.png)</div>
+  </div>
+- ⚠️ ถ้าเลือกแบบ Audience แบบ External และไม่ได้เพิ่ม Test user จะไม่สามารถ sing in ได้ แบบนี้
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/25.png)</div>
+  </div>
+- หากเป็น Test mode ให้เลือก Continue (กรณี Audience เป็น Internal จะไม่มีหน้าจอนี้)
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/26.png)</div>
+  </div>
+- ให้สิทธิการใช้งานทั้งหมด (กรณี Audience เป็น Internal จะเลือกไม่ได้) และกดปุ่ม Continue
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/27.png)</div>
+  </div>
+- เมื่อสำเร็จจะได้แบบนี้
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/28.png)</div>
+  </div>
+- ในส่วนของ Google Drive สามารถใช้ Client ID และ Client Secret เดียวกันได้ หรือจะสร้างใหม่ก็ เสร็จให้กดสร้าง Credentials ที่ n8n โดยเลือกเป็น Google Drive OAuth2 API
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/29.png)</div>
+  </div>
+- และทำขั้นตอนซ้ำเหมือนการเชื่อมต่อ Gmail
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/30.png)</div>
+  </div>
+
+## การเชื่อมต่อกับ Gemini API
+
+เพื่อเปิดใช้งาน AI Model โดยมีขั้นตอนดังนี้
+
+### Step 1: สร้าง API Key
+
+- ไปที่ https://aistudio.google.com/u/1/apikey
+- กดปุ่ม Create API Key
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/31.png)</div>
+  </div>
+- เลือกไปที่โปรเจคของเรา ในบทความใช้ `n8n-dev`
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/32.png)</div>
+  </div>
+- กดปุ่ม Create API Key in existing project
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/33.png)</div>
+  </div>
+- จะได้ API key ออกมา ให้ Copy เก็บไว้ก่อน
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/34.png)</div>
+  </div>
+
+### Step 2: สร้าง n8n credentials
+
+- กลับมาที่ n8n ให้เลือกสร้าง Credential ใหม่ โดยเลือกเป็น Google Gemini(PaLM) Api
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/35.png)</div>
+  </div>
+- ใส่ API Key และกดปุ่ม Save
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/36.png)</div>
+  </div>
+- ถ้าสำเร็จ จะมีข้อความบอกแบบนี้
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/37.png)</div>
+  </div>
+
+## การเชื่อมต่อกับ PostgreSQL
+
+ในบทความนี้จะทำการเชื่อมต่อ PostgreSQL โดยจะใช้ตัวอย่างจาก PostgreSQL ใน [supabase](https://supabase.com/) ซึ่งสามารถใช้ได้กับการติดตั้งเอง
+
+### Step 1: สร้างโปรเจคใหม่ใน Supabase
+
+ใครมีอยู่แล้วสามารถข้ามไปขั้นตอนถัดไปได้เลย
+
+- ไปที่ https://supabase.com/dashboard/
+- กดปุ่ม New project
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/38.png)</div>
+  </div>
+- ทำการตั้งชื่อโปรเจค และกำหนดรหัสผ่าน แล้วกดปุ่ม Create new project
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/39.png)</div>
+  </div>
+- เสร็จแล้วก็จะได้โปรเจคใหม่ออกมา
+
+### Step 2: หาค่าเชื่อมต่อฐานข้อมูล
+
+- ที่หน้า Project overview ให้เลือกปุ่ม Connect
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/40.png)</div>
+  </div>
+- ให้เลื่อนลงมาที่ Transaction pooler
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/41.png)</div>
+  </div>
+- กดที่ View parameters โดยเราจะนำค่าตรงนี้ไปใช้งาน
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/42.png)</div>
+  </div>
+
+### Step 3: สร้าง PostgreSQL Credentials
+
+- กลับมาที่ n8n แล้วกดสร้าง Credential และเลือกเป็น Postgres
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/43.png)</div>
+  </div>
+- ให้ทำการแก้ไข ดังนี้
+  - Host: ตามค่าของ Transaction pooler
+  - Database: ตามค่าของ Transaction pooler
+  - User: ตามค่าของ Transaction pooler
+  - Password: รหัสผ่านที่ระบุตอนสร้างโปรเจค
+  - Port: ตามค่าของ Transaction pooler
+    <div className="flex justify-center">
+      <div>![](/static/images/n8n/credential_setup/44.png)</div>
+    </div>
+- กดปุ่ม Save
+- ถ้าสำเร็จ จะมีข้อความแจ้งแบบนี้
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/45.png)</div>
+  </div>
+
+## ทดสอบการเชื่อมต่อ Credentials
+
+ลองทดสอบว่า credentials ที่เราสร้างไปสามารถใช้งานได้ หรือไม่โดย มีขั้นตอนดังนี้
+
+- ดาวน์โหลดไฟล์ Workflow สำหรับการทดสอบจาก[ที่นี่](https://gist.githubusercontent.com/somprasongd/78c7411d69e930636ae3c824c1db0ccf/raw/00a23d0a1ee444ab7070f045ce4119cd3d5012dc/credential_test.json)
+- ไปที่ n8n สร้าง Workflow ใหม่
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/46.png)</div>
+  </div>
+- เลือกที่ … แล้วเลือก Import from File และเลือกไฟล์ที่ดาวน์โหลดมา
+- Workflow ที่ได้มาจะขึ้นสีแดง
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/47.png)</div>
+  </div>
+- เราต้องทำการเลือก Credential ของตัวเองให้ถูกต้องก่อน โดยการ double click ที่ node แล้วเลือก credential ให้ถูกต้อง
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/48.png)</div>
+  </div>
+- ทดสอบโดยกดปุ่ม Open chat
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/49.png)</div>
+  </div>
+- ให้ลองพิมพ์ทดสอบ ตามนี้
+  - อีเมลของฉัน [somprasong.damyos@gmail.com](mailto:somprasong.damyos@gmail.com) (ทดสอบ Gemini API, Postgres)
+  - แต่งเรื่องตลก 2 เรื่อง แล้วส่งอีเมลให้หน่อย (ทดสอบ Gmail API)
+    <div className="flex justify-center">
+      <div>![](/static/images/n8n/credential_setup/50.png)</div>
+    </div>
+- ถ้าทุกอย่างรันได้ แสดงว่าเราถูกต้องแล้ว 🎉
+  <div className="flex justify-center">
+    <div>![](/static/images/n8n/credential_setup/51.png)</div>
+  </div>
