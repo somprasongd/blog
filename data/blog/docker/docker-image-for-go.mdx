@@ -1,0 +1,129 @@
+---
+title: การสร้าง Docker Image สำหรับ Go ให้เหมาะกับ Production
+date: '2025-06-30'
+tags: ['docker, go']
+draft: false
+summary: 'แนวทางสร้าง Go container image ที่ เล็ก ปลอดภัย deploy ง่าย และ maintain ได้ระยะยาว'
+---
+
+# การสร้าง Docker Image สำหรับ Go ให้เหมาะกับ Production
+
+> แนวทางสร้าง Go container image ที่ เล็ก ปลอดภัย deploy ง่าย และ maintain ได้ระยะยาว
+
+เมื่อพัฒนาแอปพลิเคชันด้วยภาษา Go หนึ่งในจุดเด่นที่สำคัญคือการสร้างไฟล์ไบนารีแบบ static ทำให้เหมาะอย่างยิ่งสำหรับนำไปบรรจุใน Docker container ที่มีขนาดเล็กและปลอดภัย ซึ่ง Alpine Linux เป็นฐานที่คนนิยมใช้เพราะขนาดเล็กและมีแพ็กเกจพื้นฐานเพียงพอสำหรับงานส่วนใหญ่
+
+แต่การจะทำให้ container ขนาดเล็กและพร้อมใช้จริงใน production ต้องเข้าใจประเด็นสำคัญทั้งในแง่ของ build, dependency, และการจัดการ image ให้มีความเสถียรและปลอดภัย
+
+---
+
+### ปิด cgo (CGO_ENABLED=0) เพื่อสร้าง static binary
+
+โดยปกติ Go จะเปิดใช้ cgo เป็นค่าเริ่มต้นหากโค้ดมีการเรียกไลบรารี C หรือใช้ฟังก์ชันมาตรฐานบางส่วนที่อ้างอิง libc ซึ่งอาจทำให้ไฟล์ไบนารีต้องพึ่งพา shared library ภายนอก เช่น glibc หรือ musl
+
+เมื่อใช้ Alpine ซึ่งใช้ musl libc แทน glibc ปัญหาที่พบบ่อยคือไฟล์ไบนารีที่พึ่ง glibc จะรันไม่สำเร็จ หากต้องการความแน่นอนว่ารันได้ทุกที่บน Linux base image ควรตั้ง `CGO_ENABLED=0` เพื่อให้ Go สร้างไฟล์ไบนารีที่ลิงก์แบบ static ทั้งหมด ลดปัญหา dependency ภายนอก
+
+ตัวอย่างที่นิยมคือ
+
+```docker
+ENV CGO_ENABLED=0
+```
+
+---
+
+### ลดขนาดไฟล์ด้วย ldflags "-s -w"
+
+ตัวเลือก `-ldflags="-s -w"` เป็นอีกเทคนิคที่ใช้กันทั่วไปเพื่อลดขนาดไฟล์ที่ได้จาก `go build`
+
+- `s` จะตัด symbol table ซึ่งไม่จำเป็นต่อการรันจริง
+- `w` จะตัดข้อมูลสำหรับการ debug (DWARF)
+
+ผลคือขนาดไฟล์จะลดลงได้หลาย MB แต่ข้อควรระวังคือ หากต้องใช้เครื่องมือ debug เช่น Delve ข้อมูลเหล่านี้จะหายไป ทำให้ debug ได้ลำบากขึ้น เทคนิคนี้จึงเหมาะสำหรับ build ไบนารีที่ใช้จริงใน production เท่านั้น
+
+---
+
+### ทำไมไม่ควรใช้ alpine:latest
+
+หลายคนมักเขียน Dockerfile ว่า `FROM alpine:latest` เพราะง่าย แต่ในทางปฏิบัติ นี่เป็นสิ่งที่ควรหลีกเลี่ยง เนื่องจาก tag `latest` ไม่ได้ผูกกับ version ใด ๆ แบบตายตัว ภายใน repository อาจอัปเดตเมื่อใดก็ได้โดยไม่ประกาศล่วงหน้า ซึ่งทำให้ build ครั้งถัดไปอาจได้ base image ที่ไม่เหมือนเดิมและอาจเกิดปัญหาใหม่โดยไม่รู้ตัว
+
+แนวทางที่ควรทำคือระบุเวอร์ชันให้ชัดเจน เช่น `FROM alpine:3.18` เพื่อให้แน่ใจว่าผลลัพธ์ reproducible และ rollback ได้ง่ายหากเกิดปัญหา
+
+---
+
+### ใช้ Multi-Stage Build เพื่อลดขนาดและจัดการได้ง่าย
+
+Dockerfile สำหรับ Go ที่ดีควรแยกขั้นตอน build ออกจากขั้นตอน runtime โดยใช้ multi-stage build ขั้นแรกใช้ image `golang:<version>-alpine` สำหรับ compile โค้ด ขั้นถัดไปใช้ `alpine:<version>` หรือแม้แต่ `scratch` เพื่อลดขนาด image
+
+ตัวอย่างโครงสร้าง
+
+```docker
+# Build Stage
+FROM golang:1.24-alpine AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+
+ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64
+ARG VERSION=latest
+
+RUN go build -ldflags="-s -w -X 'main.Version=${VERSION}'" -o /app/app ./cmd/api/main.go
+
+# Final Stage
+FROM alpine:3.22
+
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S appgroup \
+    && adduser -S appuser -G appgroup
+
+WORKDIR /app
+COPY --from=builder /app/app .
+
+USER appuser
+
+EXPOSE 8080
+
+ENTRYPOINT ["./app"]
+
+```
+
+---
+
+### ใช้ Non-Root User
+
+อีกหนึ่งจุดที่หลายคนมองข้ามคือ user ที่ container ใช้รันโปรเซส เริ่มต้น container จะรันด้วย root ซึ่งถ้าเกิดช่องโหว่ ผู้โจมตีอาจใช้สิทธิ root ภายใน container เพื่อโจมตีต่อได้ง่าย
+
+วิธีแก้คือสร้าง user สิทธิจำกัด แล้วสั่งให้ container รันด้วย user นี้แทน การเพิ่มบรรทัด `adduser` และ `USER` ใน Dockerfile เป็นวิธีปฏิบัติมาตรฐานที่ช่วยปิดความเสี่ยงนี้ได้ดี
+
+---
+
+### ENTRYPOINT vs CMD
+
+หลายคนสับสนระหว่าง `ENTRYPOINT` และ `CMD` ว่าควรใช้แบบไหน ต่างกันอย่างไร
+
+- `ENTRYPOINT` ใช้กำหนด **คำสั่งหลัก** ที่ container ต้องรันเสมอ ไม่ว่าผู้ใช้จะสั่ง `docker run` พร้อม argument อะไร คำสั่งนี้จะถูกเรียกเสมอ โดย argument ที่ตามมาจะถูกต่อท้าย
+- `CMD` ใช้กำหนด **default arguments** ถ้า `docker run` ไม่ได้ระบุ argument ใหม่ ระบบจะใช้ค่าใน `CMD` แทน แต่ถ้าผู้ใช้ระบุ argument ใหม่ทั้งหมด `CMD` จะถูกแทนที่ทันที
+
+ตัวอย่างเช่น
+
+```docker
+ENTRYPOINT ["./app"]
+CMD ["--port=8080"]
+```
+
+กรณีนี้ หากรัน `docker run myapp` จะได้ `./app --port=8080` ถ้ารัน `docker run myapp --help` จะได้ `./app --help`
+
+การใช้ `ENTRYPOINT` แบบ exec form (`["./app"]`) ยังช่วยให้โปรเซสของเราทำงานเป็น PID 1 โดยตรง ทำให้จัดการ signal ได้ถูกต้อง โดยเฉพาะ SIGTERM ซึ่งสำคัญต่อการทำ graceful shutdown ใน production
+
+---
+
+## สรุปแนวทาง Production Docker Image สำหรับ Go
+
+- ปิด cgo (`CGO_ENABLED=0`) เพื่อสร้างไฟล์ static
+- ใช้ `ldflags="-s -w"` เพื่อลดขนาดไฟล์
+- ระบุ base image version ชัดเจน เช่น `alpine:3.18` อย่าใช้ `latest`
+- แยกขั้น build ออกจากขั้น runtime ด้วย multi-stage build
+- สร้าง non-root user เพื่อลดความเสี่ยง
+- ใช้ `ENTRYPOINT` เพื่อกำหนด command หลัก และ `CMD` เพื่อกำหนด default arguments
+
+แนวทางทั้งหมดนี้จะช่วยให้ได้ Docker Image ที่ขนาดเล็ก เสถียร ปลอดภัย และจัดการได้ง่ายจริงในงาน production
