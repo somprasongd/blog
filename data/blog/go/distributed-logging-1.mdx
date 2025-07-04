@@ -193,14 +193,12 @@ func RequestContext() fiber.Handler {
 
 ---
 
----
-
 ## Handler → Service → Repository ใช้ Logger จาก Context
 
 ### Handler
 
 ```go
-// handler/user.go
+// handler/user_handler.go
 package handler
 
 import (
@@ -242,7 +240,7 @@ func (h *UserHandler) GetUser(c *fiber.Ctx) error {
 ### Service
 
 ```go
-// service/user.go
+// service/user_service.go
 package service
 
 import (
@@ -274,6 +272,7 @@ func (s *UserService) GetUser(ctx context.Context, userID string) (any, error) {
 ### Repository
 
 ```go
+// repository/user_repository.go
 package repository
 
 import (
@@ -305,6 +304,7 @@ func (r *UserRepository) FindByID(ctx context.Context, userID string) (any, erro
 ### Main
 
 ```go
+// cmd/main.go
 package main
 
 import (
@@ -356,7 +356,7 @@ RUN go mod download
 COPY . .
 
 # Build binary - youสามารถเปลี่ยนชื่อได้ตามต้องการ
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app .
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app ./cmd/main.go
 
 # ---------- STAGE 2: Run ----------
 FROM alpine:latest
@@ -395,8 +395,6 @@ services:
   app:
     build: .
     container_name: backend-app
-    ports:
-      - '3000:3000'
 ```
 
 ### Run
@@ -405,7 +403,7 @@ services:
 docker compose up -d --build
 ```
 
-ทดสอบเรียก `curl http://localhost/user/1`
+ทดสอบเรียก `curl` http://localhost/users/1
 
 ---
 
@@ -414,9 +412,9 @@ docker compose up -d --build
 เรียกดู Log ด้วยคำสั่ง `docker compose logs app`
 
 ```bash
-backend-app  | {"level":"info","ts":1751599917.3295856,"caller":"service/user.go:20","msg":"calling repo","app_name":"demo-logger","request_id":"d76098e7740b93c464af5b024c23bf0a","user_id":"1"}
-backend-app  | {"level":"info","ts":1751599917.3341696,"caller":"repository/user.go:19","msg":"querying database","app_name":"demo-logger","request_id":"d76098e7740b93c464af5b024c23bf0a","user_id":"1"}
-backend-app  | {"level":"info","ts":1751599917.3342874,"caller":"handler/user.go:28","msg":"success get user","app_name":"demo-logger","request_id":"d76098e7740b93c464af5b024c23bf0a","user_id":"1"}
+backend-app  | {"level":"info","ts":1751602673.5724216,"caller":"service/user_service.go:20","msg":"calling repo","app_name":"demo-logger","request_id":"29988fdef291b7afaadaa872cea0d5ba","user_id":"1"}
+backend-app  | {"level":"info","ts":1751602673.5769289,"caller":"repository/user_repository.go:19","msg":"querying database","app_name":"demo-logger","request_id":"29988fdef291b7afaadaa872cea0d5ba","user_id":"1"}
+backend-app  | {"level":"info","ts":1751602673.5770924,"caller":"handler/user_handler.go:28","msg":"success get user","app_name":"demo-logger","request_id":"29988fdef291b7afaadaa872cea0d5ba","user_id":"1"}
 ```
 
 ทุก Log ที่เกิดใน Handler, Service, Repo จะมี `request_id` ติดไปด้วย ทำให้เรา grep หรือ trace cross-service ได้ง่าย
