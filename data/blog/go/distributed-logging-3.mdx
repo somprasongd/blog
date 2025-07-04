@@ -1,0 +1,289 @@
+---
+title: 'Distributed Logging: ตอนที่ 3 Promtail ดึง Log จาก Kubernetes'
+date: '2025-07-04'
+lastmod: '2025-07-04'
+tags: ['go', 'logger', loki, grafana]
+draft: false
+summary: 'เปลี่ยนจาก Docker Compose ไปรันใน Kubernetes'
+---
+
+# Distributed Logging: ตอนที่ 3 Promtail ดึง Log จาก Kubernetes
+
+[จากตอนที่แล้ว](https://somprasongd.work/blog/go/distributed-logging-2) รันด้วย Docker Compose ถ้าเปลี่ยนไปรันใน Kubernetes แล้วใช้ **label-based log filtering** ใน Promtail สำหรับดึง log ของเฉพาะ Pod/Container ที่ต้องการ จะต้องปรับแต่งหลักๆ ดังนี้
+
+---
+
+### 1. เปลี่ยนจาก `docker_sd_configs` เป็น `kubernetes_sd_configs`
+
+ใน `promtail-config.yml`:
+
+```yaml
+scrape_configs:
+  - job_name: kubernetes-pods
+    kubernetes_sd_configs:
+      - role: pod
+    relabel_configs:
+      - source_labels: [__meta_kubernetes_pod_label_logging]
+        regex: promtail
+        action: keep
+
+      - source_labels: [__meta_kubernetes_pod_name]
+        target_label: pod
+
+      - source_labels: [__meta_kubernetes_namespace]
+        target_label: namespace
+
+      - source_labels: [__meta_kubernetes_pod_label_logging_jobname]
+        target_label: job
+```
+
+- ใช้ `kubernetes_sd_configs` เพื่อดึงข้อมูล Pod จาก Kubernetes API แทน `docker_sd_configs`
+- ฟิลด์ label จะเปลี่ยนไปเป็นแบบ `__meta_kubernetes_pod_label_<labelname>`
+- `role: pod` คือการค้นหา Pod ทั้งหมดใน cluster
+
+---
+
+### 2. เพิ่มสิทธิ์ให้ Promtail อ่าน Kubernetes API
+
+- Promtail ต้องรันใน Kubernetes เป็น DaemonSet (แนะนำ) และต้องมี `RBAC` สิทธิ์อ่าน Pod metadata
+- ตัวอย่าง ServiceAccount + Role + RoleBinding สำหรับ Promtail:
+
+```yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: promtail
+  namespace: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: promtail
+rules:
+  - apiGroups: ['']
+    resources: ['pods', 'namespaces']
+    verbs: ['get', 'list', 'watch']
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: promtail
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: promtail
+subjects:
+  - kind: ServiceAccount
+    name: promtail
+    namespace: monitoring
+```
+
+---
+
+### 3. กำหนด label บน Pod / Deployment ที่ต้องการ
+
+เช่น ใน `deployment.yaml` ของแอป
+
+```yaml
+metadata:
+  labels:
+    logging: promtail
+    logging_jobname: containerlogs
+```
+
+เพื่อให้ Promtail กรอง log ได้ตาม label เหมือนกับใน docker-compose
+
+---
+
+### 4. Mount log path และ docker socket (ถ้าจำเป็น)
+
+- ใน Kubernetes ส่วนใหญ่ใช้ container runtime เช่น containerd หรือ CRI-O ที่เก็บ log ไว้ที่ `/var/log/pods` หรือ `/var/log/containers`
+- Promtail ควร mount log directory เหล่านี้ เช่น
+
+```yaml
+volumeMounts:
+  - name: varlog
+    mountPath: /var/log
+  - name: varlibdockercontainers
+    mountPath: /var/lib/docker/containers
+    readOnly: true
+  - name: dockersocket
+    mountPath: /var/run/docker.sock
+    readOnly: true
+
+volumes:
+  - name: varlog
+    hostPath:
+      path: /var/log
+  - name: varlibdockercontainers
+    hostPath:
+      path: /var/lib/docker/containers
+  - name: dockersocket
+    hostPath:
+      path: /var/run/docker.sock
+```
+
+แต่ถ้าใช้ container runtime อื่นต้องเช็ค path log ที่ถูกต้อง
+
+---
+
+### สรุป
+
+| ส่วน              | Docker Compose                         | Kubernetes                             |
+| ----------------- | -------------------------------------- | -------------------------------------- |
+| Service Discovery | docker_sd_configs                      | kubernetes_sd_configs                  |
+| Label Selector    | `__meta_docker_container_label_<name>` | `__meta_kubernetes_pod_label_<name>`   |
+| Log Path          | `/var/lib/docker/containers`           | `/var/log/pods`, `/var/log/containers` |
+| สิทธิ์            | ไม่ต้องใช้ RBAC                        | ต้องมี RBAC เพื่ออ่าน metadata จาก API |
+| Deployment        | Compose service                        | DaemonSet                              |
+
+---
+
+## ตัวอย่างไฟล์ `promtail.yaml`
+
+ตัวอย่าง **ไฟล์ `promtail.yaml`** (รวม `Namespace`, `ServiceAccount`, `RBAC`, `ConfigMap` และ `DaemonSet`) สำหรับรัน **Promtail** ใน Kubernetes แบบ **best practice** พร้อม **Label filter** อ่านเฉพาะ Pod ที่ติด `logging: promtail` เหมือนกรณี docker-compose
+
+```yaml
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: promtail
+  namespace: monitoring
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: promtail
+rules:
+  - apiGroups: ['']
+    resources: ['pods', 'nodes', 'namespaces']
+    verbs: ['get', 'list', 'watch']
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: promtail
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: promtail
+subjects:
+  - kind: ServiceAccount
+    name: promtail
+    namespace: monitoring
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: promtail-config
+  namespace: monitoring
+  labels:
+    name: promtail-config
+data:
+  promtail.yaml: |
+    server:
+      http_listen_port: 9080
+      grpc_listen_port: 0
+
+    positions:
+      filename: /run/promtail/positions.yaml
+
+    clients:
+      - url: http://loki:3100/loki/api/v1/push
+
+    scrape_configs:
+      - job_name: kubernetes-pods
+        pipeline_stages:
+          - docker: {}
+          - json:
+              expressions:
+                app_name: app_name
+          - labels:
+              app: app_name
+
+        kubernetes_sd_configs:
+          - role: pod
+
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_logging]
+            regex: promtail
+            action: keep
+
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+
+          - source_labels: [__meta_kubernetes_pod_label_logging_jobname]
+            target_label: job
+
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+
+        # ใช้ paths container log
+        static_configs:
+        - targets:
+            - localhost
+          labels:
+            __path__: /var/log/pods/*/*/*.log
+
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: promtail
+  namespace: monitoring
+  labels:
+    app: promtail
+spec:
+  selector:
+    matchLabels:
+      app: promtail
+  template:
+    metadata:
+      labels:
+        app: promtail
+    spec:
+      serviceAccountName: promtail
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: promtail
+          image: grafana/promtail:latest
+          args:
+            - -config.file=/etc/promtail/promtail.yaml
+          volumeMounts:
+            - name: config
+              mountPath: /etc/promtail
+            - name: positions
+              mountPath: /run/promtail
+            - name: varlog
+              mountPath: /var/log
+            - name: varlibdockercontainers
+              mountPath: /var/lib/docker/containers
+              readOnly: true
+      volumes:
+        - name: config
+          configMap:
+            name: promtail-config
+        - name: positions
+          emptyDir: {}
+        - name: varlog
+          hostPath:
+            path: /var/log
+        - name: varlibdockercontainers
+          hostPath:
+            path: /var/lib/docker/containers
+```
