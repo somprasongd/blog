@@ -43,6 +43,29 @@ summary: 'ใช้ Request ID, NGINX Proxy และ Go Fiber'
 
 ---
 
+## โครงสร้างไฟล์โปรเจกต์
+
+```bash
+project/
+ ├── cmd/
+ │   └── main.go
+ ├── middleware/
+ │   └── request_context.go
+ ├── handler/
+ │   └── user_handler.go
+ ├── service/
+ │   └── user_service.go
+ ├── repository/
+ │   └── user_repository.go
+ ├── Dockerfile
+ ├── docker-compose.yml
+ ├── nginx.conf
+ ├── go.mod
+ └── go.sum
+```
+
+---
+
 ## Config NGINX ให้ใส่ `X-Request-ID`
 
 เริ่มที่ Proxy ก่อน สมมติคุณมี `nginx.conf` ประมาณนี้:
@@ -63,7 +86,7 @@ http {
 
   # ตั้ง backend upstream
   upstream backend {
-    server 127.0.0.1:3000;
+    server app:3000;
   }
 }
 ```
@@ -72,10 +95,6 @@ http {
 
 - `$request_id` ของ NGINX คือ Unique ID ที่ NGINX generate ให้แต่ละ Request
 - ถ้าข้างหน้ามี Load Balancer ที่ generate ไว้แล้ว หรือ Client ส่ง `X-Request-ID` มาก่อนแล้ว `$request_id` ของ NGINX จะ preserve ให้โดยอัตโนมัติ
-
----
-
-## Logger: สร้าง Logger
 
 ---
 
@@ -316,12 +335,88 @@ func main() {
 
 ---
 
-## ผลลัพธ์
+## Build: สร้าง Dockerfile และ docker-compose
+
+### Dockerfile
+
+```docker
+# ---------- STAGE 1: Build ----------
+FROM golang:1.24 AS builder
+
+# Set working dir
+WORKDIR /app
+
+# Copy go.mod and go.sum first for caching dependencies
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy the source code
+COPY . .
+
+# Build binary - youสามารถเปลี่ยนชื่อได้ตามต้องการ
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app .
+
+# ---------- STAGE 2: Run ----------
+FROM alpine:latest
+
+# ทำให้ binary ทำงานได้ (สำหรับบาง lib เช่น timezone)
+RUN apk --no-cache add ca-certificates
+
+# Set working dir
+WORKDIR /root/
+
+# Copy binary จาก builder stage
+COPY --from=builder /app/app .
+
+# Expose port (ถ้ามี)
+EXPOSE 3000
+
+# Command to run
+CMD ["./app"]
+
+```
+
+### docker-compose.yml
+
+```yaml
+services:
+  nginx:
+    image: nginx:latest
+    container_name: nginx-proxy
+    ports:
+      - '80:80'
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+
+  app:
+    build: .
+    container_name: backend-app
+    ports:
+      - '3000:3000'
+```
+
+### Run
 
 ```bash
-{"level":"info","ts":1751597002.1723678,"caller":"service/user.go:20","msg":"calling repo","app_name":"demo-logger","request_id":"eca427de-9fac-4ec5-aedb-7be21d0c3953","user_id":"1"}
-{"level":"info","ts":1751597002.172718,"caller":"repository/user.go:19","msg":"querying database","app_name":"demo-logger","request_id":"eca427de-9fac-4ec5-aedb-7be21d0c3953","user_id":"1"}
-{"level":"info","ts":1751597002.1727302,"caller":"handler/user.go:29","msg":"success get user","app_name":"demo-logger","request_id":"eca427de-9fac-4ec5-aedb-7be21d0c3953","user_id":"1"}
+docker compose up -d --build
+```
+
+ทดสอบเรียก `curl http://localhost/user/1`
+
+---
+
+## ผลลัพธ์
+
+เรียกดู Log ด้วยคำสั่ง `docker compose logs app`
+
+```bash
+backend-app  | {"level":"info","ts":1751599917.3295856,"caller":"service/user.go:20","msg":"calling repo","app_name":"demo-logger","request_id":"d76098e7740b93c464af5b024c23bf0a","user_id":"1"}
+backend-app  | {"level":"info","ts":1751599917.3341696,"caller":"repository/user.go:19","msg":"querying database","app_name":"demo-logger","request_id":"d76098e7740b93c464af5b024c23bf0a","user_id":"1"}
+backend-app  | {"level":"info","ts":1751599917.3342874,"caller":"handler/user.go:28","msg":"success get user","app_name":"demo-logger","request_id":"d76098e7740b93c464af5b024c23bf0a","user_id":"1"}
 ```
 
 ทุก Log ที่เกิดใน Handler, Service, Repo จะมี `request_id` ติดไปด้วย ทำให้เรา grep หรือ trace cross-service ได้ง่าย
