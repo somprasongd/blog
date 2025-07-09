@@ -1,0 +1,620 @@
+---
+title: 'Observability Series ตอนที่ 4 — เก็บ Metrics ด้วย OpenTelemetry + OTLP Metric (gRPC)'
+date: '2025-07-09'
+lastmod: '2025-07-09'
+tags: ['go', 'observability', 'trace', 'tempo', 'grafana']
+draft: false
+summary: 'ตอนนี้เราจะเริ่ม เก็บ Metrics ให้เห็นใน Grafana โดยใช้ Prometheus'
+---
+
+> ตอนนี้เราจะเริ่ม **เก็บ Metrics** ให้เห็นใน **Grafana** โดยใช้ **Prometheus**
+
+---
+
+## สิ่งที่จะได้ในตอนนี้
+
+- เก็บ Metrics ด้วย **OpenTelemetry Metrics API**
+- ใช้ **OTLP gRPC Exporter**
+- ให้ **OTel Collector** รับ OTLP Metric → แปลงเป็น Prometheus Format
+- ใช้ **Middleware** วัด Request Count + Latency อัตโนมัติ
+- Prometheus Scrape จาก OTel Collector
+- ดู Metrics ใน Grafana
+
+---
+
+## ทำไมใช้ OTLP ดีกว่า Prometheus Exporter ตรง ๆ ?
+
+- แอปไม่ต้องเปิดพอร์ต `/metrics` เอง
+- ใช้ Protocol มาตรฐานเดียวกับ Traces (`OTLP gRPC`)
+- OTel Collector ทำหน้าที่ Gateway รวม Traces, Metrics
+- เปลี่ยน Destination ได้ง่าย เช่น ส่งไป Prometheus, Mimir หรือ Cloud
+
+---
+
+## Architecture
+
+```
+[Fiber App]
+   |
+[OTLP Metric gRPC Exporter]
+   |
+[OTel Collector]
+   |
+[Prometheus]
+   |
+[Grafana]
+```
+
+---
+
+## โครงสร้างโปรเจ็กต์
+
+โค้ดตั้งต้น: https://github.com/somprasongd/observability-demo-go/tree/feat/trace
+
+```
+project-root/
+│
+├── cmd/
+│   └── main.go               # จุดเริ่มโปรแกรม, bootstrap Fiber, DI, middleware
+│
+├── internal/
+│   ├── handler/
+│   │   └── user_handler.go   # HTTP Handlers (Fiber routes)
+│   │
+│   ├── service/
+│   │   └── user_service.go   # Business Logic Layer
+│   │
+│   └── repository/
+│       └── user_repo.go      # Data Access Layer
+│
+├── pkg/
+│   ├── ctxkey/
+│   │   └── ctxkey.go         # Shared Lib: เก็บ context key
+│   │
+│   ├── logger/
+│   │   └── logger.go         # Shared Lib: Logger setup (Zap)
+│   │
+│   ├── middleware/           # Shared Lib: Middleware
+│   │    └── observability_middleware.go
+│   │
+│   └── observability/
+│       └── observability.go  # Shared Lib: Trace + Metric
+│
+├── go.mod
+└── go.sum
+```
+
+---
+
+## ขั้นตอน
+
+### 1. ติดตั้ง Packages
+
+```bash
+go get go.opentelemetry.io/otel
+go get go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc
+go get go.opentelemetry.io/otel/sdk/metric
+go get go.opentelemetry.io/otel/metric
+go get go.opentelemetry.io/contrib/instrumentation/runtime
+```
+
+---
+
+### 2. สร้าง Metrics Provider (OTLP gRPC)
+
+`/pkg/observability/observability.go`
+
+```go
+package observability
+
+import (
+	"context"
+	"log"
+	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+
+	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+)
+
+type OTel struct {
+	TracerProvider *sdktrace.TracerProvider
+	MeterProvider  *sdkmetric.MeterProvider // เพิ่ม metric
+}
+
+func (c *OTel) Shutdown(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := c.TracerProvider.Shutdown(ctx); err != nil {
+		log.Println("failed to shutdown tracer:", err)
+	}
+
+	if err := c.MeterProvider.Shutdown(ctx); err != nil { // เพิ่ม metric
+		log.Println("failed to shutdown meter:", err)
+	}
+}
+
+func NewOTel(ctx context.Context, collectorAddr, serviceName string) (*OTel, error) {
+	// ----- Resource -----
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceName(serviceName),
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// ----- Tracer -----
+	traceExp, err := otlptracegrpc.New(ctx,
+		otlptracegrpc.WithEndpoint(collectorAddr),
+		otlptracegrpc.WithInsecure(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(traceExp),
+		sdktrace.WithResource(res),
+	)
+	otel.SetTracerProvider(tp)
+
+	// ----- Meter -----
+	metricExp, err := otlpmetricgrpc.New(ctx,
+		otlpmetricgrpc.WithEndpoint(collectorAddr),
+		otlpmetricgrpc.WithInsecure(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	mp := sdkmetric.NewMeterProvider(
+		sdkmetric.WithReader(
+			sdkmetric.NewPeriodicReader(metricExp),
+		),
+		sdkmetric.WithResource(res),
+	)
+	otel.SetMeterProvider(mp)
+
+	return &OTel{
+		TracerProvider: tp,
+		MeterProvider:  mp,
+	}, nil
+}
+```
+
+---
+
+### 3. Middleware วัด Metrics ทุก Request
+
+ให้รับ meter เข้ามาเพื่อวัด Metrics ทุก Request
+
+- `http_requests_total` → Request Count
+- `http_request_duration_seconds` → Latency Histogram
+- `http_requests_inflight` → Inflight Count
+- `http_request_size_bytes` → Request Size Histogram
+- `http_response_size_bytes` → Response Size Histogram
+- `http_requests_error_total` → Errors Counter
+
+`/internal/middleware/obervability_middleware.go`
+
+```go
+package middleware
+
+import (
+	"context"
+	"demo/pkg/ctxkey"
+	"fmt"
+	"runtime/debug"
+	"strings"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/metric"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+)
+
+func NewObservabilityMiddleware(
+	baseLogger *zap.Logger,
+	tracer trace.Tracer,
+	meter metric.Meter,
+) fiber.Handler {
+
+	// ----- OTel Instruments -----
+	requestCounter, _ := meter.Int64Counter("http_requests_total")
+	requestDuration, _ := meter.Float64Histogram("http_request_duration_ms")
+	inflightCounter, _ := meter.Int64UpDownCounter("http_requests_inflight")
+	requestSize, _ := meter.Float64Histogram("http_request_size_bytes")
+	responseSize, _ := meter.Float64Histogram("http_response_size_bytes")
+	errorCounter, _ := meter.Int64Counter("http_requests_error_total")
+
+	// Skip Paths ที่ไม่ต้องการ trace
+	skipPaths := map[string]bool{
+		"/health":  true,
+		"/metrics": true,
+	}
+	// กรณีมีการ serve SPA
+	staticPrefixes := []string{"/static", "/assets", "/public", "/favicon", "/robots.txt"}
+
+	return func(c *fiber.Ctx) error {
+		start := time.Now()
+		method := c.Method()
+		path := c.Path()
+
+		// ตรวจสอบ path ที่เรียกมา
+		skip := skipPaths[path]
+		for _, prefix := range staticPrefixes {
+			if strings.HasPrefix(path, prefix) {
+				skip = true
+				break
+			}
+		}
+
+		var (
+			ctx     context.Context
+			span    trace.Span
+			traceID string
+		)
+
+		if skip {
+			ctx = c.Context()
+		} else {
+			ctx, span = tracer.Start(c.Context(), "HTTP "+c.Method()+" "+path)
+			defer span.End()
+			traceID = span.SpanContext().TraceID().String()
+		}
+
+		requestID := c.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.New().String()
+		}
+
+		// Bind Request ID ลง Response Header
+		c.Set("X-Request-ID", requestID)
+
+		// สร้าง child logger
+		reqLogger := baseLogger.With(
+			zap.String("trace_id", traceID), // เพิ่ม trace_id เพื่อเชื่อมโยง log กับ trace
+			zap.String("request_id", requestID),
+		)
+
+		// สร้าง Context ใหม่ที่มี logger
+		ctx = context.WithValue(ctx, ctxkey.Logger{}, reqLogger)
+		// แทน Context เดิม
+		c.SetUserContext(ctx)
+
+		// ----- Record Inflight -----
+		if !skip {
+			inflightCounter.Add(ctx, 1)
+		}
+
+		err := c.Next()
+
+		duration := time.Since(start).Milliseconds()
+		status := c.Response().StatusCode()
+
+		if !skip {
+			labels := []attribute.KeyValue{
+				attribute.String("method", method),
+				attribute.String("path", path),
+				attribute.Int("status", status),
+			}
+
+			requestCounter.Add(ctx, 1, metric.WithAttributes(labels...))
+			requestDuration.Record(ctx, float64(duration), metric.WithAttributes(labels...))
+			inflightCounter.Add(ctx, -1)
+
+			// Request Size (Header Content-Length)
+			if reqSize := c.Request().Header.ContentLength(); reqSize > 0 {
+				requestSize.Record(ctx, float64(reqSize), metric.WithAttributes(labels...))
+			}
+
+			// Response Size (Body Length)
+			if resSize := len(c.Response().Body()); resSize > 0 {
+				responseSize.Record(ctx, float64(resSize), metric.WithAttributes(labels...))
+			}
+
+			if status >= 400 {
+				errorCounter.Add(ctx, 1, metric.WithAttributes(labels...))
+			}
+		}
+
+		// log unhandle error
+		if err != nil {
+			reqLogger.Error("an error occurred",
+				zap.Any("error", err),
+				zap.ByteString("stack", debug.Stack()),
+			)
+		}
+
+		msg := fmt.Sprintf("%d - %s %s", status, method, path)
+		reqLogger.Info(msg,
+			zap.Int("status", status),
+			zap.Int64("duration_ms", duration),
+		)
+
+		return err
+	}
+}
+```
+
+---
+
+### 4. แก้ไข Main
+
+`/cmd/main.go`
+
+```go
+package main
+
+import (
+	"context"
+	"os"
+	"time"
+
+	"go.opentelemetry.io/contrib/instrumentation/runtime"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+
+	"demo/internal/handler"
+	"demo/internal/repository"
+	"demo/internal/service"
+	"demo/pkg/logger"
+	"demo/pkg/middleware"
+	"demo/pkg/observability"
+)
+
+func main() {
+	// Init Logger
+	logger.Init()
+
+	// Init Observability via Opentelmetry
+	otel, err := observability.NewOTel(
+		context.Background(),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		"demo-app")
+	if err != nil {
+		logger.Default().Fatal(err.Error())
+	}
+	defer otel.Shutdown(context.Background())
+
+	// เก็บ Process Metrics: สร้าง Runtime Instrument → ผูกกับ MeterProvider
+	runtime.Start(
+		runtime.WithMinimumReadMemStatsInterval(time.Second * 10),
+	)
+
+	// Init Fiber
+	app := fiber.New()
+
+	// Middlewares
+	app.Use(middleware.NewObservabilityMiddleware(
+		logger.Default(),
+		otel.TracerProvider.Tracer("demo-app"),
+		otel.MeterProvider.Meter("demo-app"), // เพิ่มส่ง meter
+	))
+	app.Use(cors.New())
+	app.Use(recover.New())
+
+	// Init DI
+	repo := repository.NewUserRepository()
+	svc := service.NewUserService(repo)
+	h := handler.NewUserHandler(svc)
+
+	// Routes
+	app.Get("/users/:id", h.GetUser)
+
+	// Start
+	app.Listen(":8080")
+}
+```
+
+`runtime.WithMinimumReadMemStatsInterval()` ใช้สำหรับเก็บ runtime metrics (Goroutines Count, GC Pauses, Heap Usage)
+
+---
+
+### 5. ส่ง Metric ไป Prometheus
+
+ส่งผ่าน OTel Pipeline → Collector → Prometheus
+
+- สร้าง config ของ Prometheus
+  `prometheus.yml` \*\*\*\*
+
+  ```yaml
+  global:
+    scrape_interval: 5s
+
+  scrape_configs:
+    - job_name: 'otel-collector'
+      static_configs:
+        - targets: ['otel-collector:9464']
+  ```
+
+- แก้ config ของ exporters เพิ่ม Prometheus
+  `otel-collector-config.yaml`
+
+  ```yaml
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+  exporters:
+    otlp/tempo:
+      endpoint: tempo:4317
+      tls:
+        insecure: true
+    prometheus:
+      endpoint: '0.0.0.0:9464'
+
+  processors:
+    batch:
+
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [batch]
+        exporters: [otlp/tempo]
+      metrics:
+        receivers: [otlp]
+        processors: [batch]
+        exporters: [prometheus]
+  ```
+
+- เพิ่ม service `prometheus`
+  `docker-compose.yml`
+
+  ```yaml
+  services:
+    app:
+      build: .
+      container_name: backend-app
+      ports:
+        - '8080:8080'
+      environment:
+        - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      depends_on:
+        - otel-collector
+      logging:
+        driver: 'json-file'
+        options:
+          max-size: '10m'
+          max-file: '5'
+      # เพิ่ม label สำหรับ filtering logs
+      labels:
+        logging: 'promtail'
+        logging_jobname: 'containerlogs'
+
+    loki:
+      image: grafana/loki:latest
+      container_name: loki
+      command: -config.file=/etc/loki/local-config.yaml
+      volumes:
+        - loki_data:/loki
+      # ports:
+      #   - "3100:3100"
+
+    promtail:
+      image: grafana/promtail:latest
+      container_name: promtail
+      volumes:
+        - ./promtail-config.yml:/etc/promtail/promtail-config.yml
+        - /var/lib/docker/containers:/var/lib/docker/containers:ro
+        - /var/run/docker.sock:/var/run/docker.sock:ro
+      command: -config.file=/etc/promtail/promtail-config.yml
+      depends_on:
+        - loki
+
+    otel-collector:
+      image: otel/opentelemetry-collector:latest
+      container_name: otel-collector
+      volumes:
+        - ./otel-collector-config.yaml:/etc/otelcol/config.yaml
+      command: ['--config=/etc/otelcol/config.yaml']
+      ports:
+        - '4317:4317' # gRPC
+        - '4318:4318' # HTTP
+        - '9464:9464'
+      depends_on:
+        - tempo
+
+    tempo:
+      image: grafana/tempo:latest
+      container_name: tempo
+      volumes:
+        - ./tempo.yaml:/etc/tempo.yaml
+      command: ['-config.file=/etc/tempo.yaml']
+      # ports:
+      #   - "3200" # tempo
+      #   - "4317" # otlp grpc
+
+    prometheus:
+      image: prom/prometheus:latest
+      container_name: prometheus
+      command: ['--config.file=/etc/prometheus/prometheus.yml']
+      volumes:
+        - ./prometheus.yml:/etc/prometheus/prometheus.yml
+        - prometheus-data:/prometheus
+      # ports:
+      #   - "9090:9090"
+
+    grafana:
+      image: grafana/grafana:latest
+      container_name: grafana
+      ports:
+        - '3000:3000'
+      environment:
+        - GF_SECURITY_ADMIN_USER=admin
+        - GF_SECURITY_ADMIN_PASSWORD=admin
+      volumes:
+        - grafana-data:/var/lib/grafana
+      depends_on:
+        - loki
+        - tempo
+        - prometheus
+
+  volumes:
+    loki_data:
+    grafana-data:
+    prometheus-data:
+  ```
+
+---
+
+### 6. ดู Metric ใน Grafana
+
+1. รัน App ด้วยคำสั่ง: `docker compose up -d --build`
+2. ส่ง Request: `curl http://localhost:8080/users/1`
+3. เปิด Grafana: http://localhost:3000 (User: admin, Password: admin)
+4. Data Source → Add data source → **Prometheus** → URL: http://prometheus:9090 → Save & test
+5. Explore → **Prometheus** → Metric: http_request_total → คุณจะเห็น Graph
+6. หรือดูที่ Drilldiwn → Metrics
+
+---
+
+## ผลลัพธ์
+
+- ทุก Request มี Metric Count + Duration และอื่นๆ
+- มีแสดง Go Process Metrics จาก Runtime
+- ใช้ Protocol มาตรฐาน OTLP → ต่อเข้ากับ OTel Collector
+- Prometheus Scrape ผ่าน Collector → ไม่ต้อง expose `/metrics` เองที่ฝั่ง App
+- ต่อยอดรวม Traces, Logs, Metrics ผ่าน Collector จุดเดียว
+
+---
+
+## **จุดเด่นแนวทางนี้**
+
+- **ง่ายต่อการจัดการ**: Export ผ่าน OTLP Protocol เดียว
+- **ยืดหยุ่น**: Collector เปลี่ยน Destination ได้ง่าย
+- **มาตรฐานเดียวกับ Tracing** → ระบบเดียวกันจัดการหมด
+
+---
+
+## สรุป
+
+- Middleware เก็บ Request Metrics
+- Rumtime เก็บ Process Metrics
+- Export ผ่าน OTLP gRPC → Collector → Prometheus
+
+---
+
+## ตอนอื่นๆ
+
+- ตอนที่ 1 — [Observability คืออะไร ทำไมต้องทำ?](/blog/go/observability-1)
+- ตอนที่ 2 — [ส่ง Log เข้า Grafana ด้วย Loki](/blog/go/observability-2)
+- ตอนที่ 3 — [ทำ Tracing ด้วย OpenTelemetry และ Tempo](/blog/go/observability-3)
