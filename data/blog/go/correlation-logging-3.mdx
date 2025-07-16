@@ -1,5 +1,5 @@
 ---
-title: 'Distributed Logging: ตอนที่ 3 Promtail ดึง Log จาก Kubernetes'
+title: 'Correlation Logging: ตอนที่ 3 Promtail ดึง Log จาก Kubernetes'
 date: '2025-07-04'
 lastmod: '2025-07-04'
 tags: ['go', 'logger', loki, grafana]
@@ -7,9 +7,9 @@ draft: false
 summary: 'เปลี่ยนจาก Docker Compose ไปรันใน Kubernetes'
 ---
 
-# Distributed Logging: ตอนที่ 3 Promtail ดึง Log จาก Kubernetes
+# Correlation Logging: ตอนที่ 3 Promtail ดึง Log จาก Kubernetes
 
-[จากตอนที่แล้ว](https://somprasongd.work/blog/go/distributed-logging-2) รันด้วย Docker Compose ถ้าเปลี่ยนไปรันใน Kubernetes แล้วใช้ **label-based log filtering** ใน Promtail สำหรับดึง log ของเฉพาะ Pod/Container ที่ต้องการ จะต้องปรับแต่งหลักๆ ดังนี้
+[จากตอนที่แล้ว](https://somprasongd.work/blog/go/correlation-logging-2) รันด้วย Docker Compose ถ้าเปลี่ยนไปรันใน Kubernetes แล้วใช้ **label-based log filtering** ใน Promtail สำหรับดึง log ของเฉพาะ Pod/Container ที่ต้องการ จะต้องปรับแต่งหลักๆ ดังนี้
 
 ---
 

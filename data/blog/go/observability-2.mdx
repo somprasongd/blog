@@ -1,7 +1,7 @@
 ---
 title: 'Observability Series ตอนที่ 2 — ส่ง Log เข้า Grafana ด้วย Loki'
 date: '2025-07-09'
-lastmod: '2025-07-09'
+lastmod: '2025-07-16'
 tags: ['go', 'observability', 'log', 'loki', 'grafana']
 draft: false
 summary: 'ตอนนี้เราจะเริ่ม เก็บ Log ให้เห็นใน Grafana โดยใช้ Loki'
@@ -96,13 +96,27 @@ import (
 	"demo/pkg/ctxkey"
 
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 )
 
 var baseLogger *zap.Logger
 
 func Init() {
-	l, _ := zap.NewProduction()
-	baseLogger = l.With(zap.String("app_name", "demo-app"))
+	config := zap.NewProductionConfig()
+	// ตั้งค่า key ของ field ให้ตรงกับ OTel semantic convention
+	config.EncoderConfig.TimeKey = "timestamp"
+	config.EncoderConfig.LevelKey = "severity"
+	config.EncoderConfig.MessageKey = "message"
+	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	var err error
+	l, err := config.Build()
+
+	if err != nil {
+		panic(err)
+	}
+
+	baseLogger = l.With(zap.String("service.name", "demo-app"))
 }
 
 func Default() *zap.Logger {
@@ -157,6 +171,8 @@ func NewObservabilityMiddleware(baseLogger *zap.Logger) fiber.Handler {
 		// สร้าง child logger
 		reqLogger := baseLogger.With(
 			zap.String("request_id", requestID),
+			zap.String("http.request.method", method),
+			zap.String("url.path", path),
 		)
 
 		// สร้าง Context ใหม่
@@ -166,7 +182,7 @@ func NewObservabilityMiddleware(baseLogger *zap.Logger) fiber.Handler {
 
 		err := c.Next()
 
-		duration := time.Since(start).Seconds()
+		duration := time.Since(start).Milliseconds()
 		status := c.Response().StatusCode()
 
 		// log unhandle error
@@ -179,8 +195,8 @@ func NewObservabilityMiddleware(baseLogger *zap.Logger) fiber.Handler {
 
 		msg := fmt.Sprintf("%d - %s %s", status, method, path)
 		reqLogger.Info(msg,
-			zap.Int("status", status),
-			zap.Float64("duration_sec", duration),
+			zap.Int("http.response.status_code", status),
+			zap.Int64("duration_ms", duration),
 		)
 
 		return err
@@ -400,13 +416,12 @@ func main() {
           - docker: {}
           - json:
               expressions:
-                app_name:
-                level:
-                msg:
+                service.name:
+                severity:
+                message:
                 request_id:
           - labels:
-              app_name:
-              level:
+              severity:
               request_id:
     ```
 

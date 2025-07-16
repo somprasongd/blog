@@ -1,7 +1,7 @@
 ---
 title: 'Observability Series ตอนที่ 3 — Tracing เชื่อม Logger ด้วย OpenTelemetry + Tempo'
 date: '2025-07-09'
-lastmod: '2025-07-09'
+lastmod: '2025-07-16'
 tags: ['go', 'observability', 'trace', 'tempo', 'grafana']
 draft: false
 summary: 'ตอนนี้เราจะเริ่ม เก็บ Trace ให้เห็นใน Grafana โดยใช้ Tempo'
@@ -21,7 +21,7 @@ summary: 'ตอนนี้เราจะเริ่ม เก็บ Trace �
 
 ---
 
-## Architecture เดิม + Tracing
+## โครงสร้างเดิม + Tracing
 
 ใช้โครงสร้างเดียวกับตอนที่ 2
 
@@ -113,13 +113,15 @@ type OTel struct {
 	TracerProvider *sdktrace.TracerProvider
 }
 
-func (c *OTel) Shutdown(ctx context.Context) {
+func (c *OTel) Shutdown(ctx context.Context) error{
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	if err := c.TracerProvider.Shutdown(ctx); err != nil {
-		log.Println("failed to shutdown tracer:", err)
+		return fmt.Errorf("failed to shutdown tracer: %w", err)
 	}
+
+	return nil
 }
 
 func NewOTel(ctx context.Context, collectorAddr, serviceName string) (*OTel, error) {
@@ -161,7 +163,7 @@ func NewOTel(ctx context.Context, collectorAddr, serviceName string) (*OTel, err
 
 ให้รับ `trace` เข้ามาเพื่อสร้าง `span` ใหม่ของแต่ละ request
 
-`/internal/middleware/obervability_middleware.go`
+> แก้ไขไฟล์ `/internal/middleware/obervability_middleware.go`
 
 ```go
 package middleware
@@ -206,20 +208,6 @@ func NewObservabilityMiddleware(
 			}
 		}
 
-		var (
-			ctx     context.Context
-			span    trace.Span
-			traceID string
-		)
-
-		if skip {
-			ctx = c.Context()
-		} else {
-			ctx, span = tracer.Start(c.Context(), "HTTP "+c.Method()+" "+path)
-			defer span.End()
-			traceID = span.SpanContext().TraceID().String()
-		}
-
 		requestID := c.Get("X-Request-ID")
 		if requestID == "" {
 			requestID = uuid.New().String()
@@ -228,10 +216,31 @@ func NewObservabilityMiddleware(
 		// Bind Request ID ลง Response Header
 		c.Set("X-Request-ID", requestID)
 
+		var (
+			ctx     context.Context
+			span    trace.Span
+			traceID string
+			spanID  string
+		)
+
+		if skip {
+			ctx = c.Context()
+		} else {
+			ctx, span = tracer.Start(c.Context(), "HTTP "+c.Method()+" "+path,
+				trace.WithAttributes(attribute.String("http.request_id", requestID)),
+				trace.WithAttributes(attribute.String("http.request.method", method)),
+				trace.WithAttributes(attribute.String("url.path", path)),
+			)
+			defer span.End()
+			traceID = span.SpanContext().TraceID().String()
+			spanID = span.SpanContext().SpanID().String()
+		}
+
 		// สร้าง child logger
 		reqLogger := baseLogger.With(
-			zap.String("trace_id", traceID), // เพิ่ม trace_id เพื่อเชื่อมโยง log กับ trace
 			zap.String("request_id", requestID),
+			zap.String("http.request.method", method),
+			zap.String("url.path", path),
 		)
 
 		// สร้าง Context ใหม่ที่มี logger
@@ -249,17 +258,56 @@ func NewObservabilityMiddleware(
 			reqLogger.Error("an error occurred",
 				zap.Any("error", err),
 				zap.ByteString("stack", debug.Stack()),
+				zap.String("trace_id", traceID), // เพิ่ม trace_id เพื่อเชื่อมโยง log กับ trace
+				zap.String("span_id", spanID),   // เพิ่ม span_id เพื่อเชื่อมโยง log กับ trace
 			)
 		}
 
 		msg := fmt.Sprintf("%d - %s %s", status, method, path)
 		reqLogger.Info(msg,
-			zap.Int("status", status),
+			zap.Int("http.response.status_code", status),
 			zap.Int64("duration_ms", duration),
+			zap.String("trace_id", traceID), // เพิ่ม trace_id เพื่อเชื่อมโยง log กับ trace
+			zap.String("span_id", spanID),   // เพิ่ม span_id เพื่อเชื่อมโยง log กับ trace
 		)
+
+		span.SetAttributes(
+			attribute.Int("http.response.status_code", status),
+		)
+
+		if status >= 400 {
+			span.SetStatus(codes.Error, "")
+		} else {
+			span.SetStatus(codes.Ok, "")
+		}
 
 		return err
 	}
+}
+```
+
+ปรับ logger ให้ใส่ `trace_id` กับ `span_id`
+
+> แก้ไขไฟล์ `/pkg/logger/logger.go`
+
+```go
+func FromContext(ctx context.Context) *zap.Logger {
+	log, ok := ctx.Value(ctxkey.Logger{}).(*zap.Logger)
+	if !ok {
+		log = baseLogger
+	}
+
+	// ดึง trace_id + span_id จาก OTel context
+	span := trace.SpanContextFromContext(ctx)
+
+	if span.IsValid() {
+		return log.With(
+			zap.String("trace_id", span.TraceID().String()), // เพิ่ม trace_id เพื่อเชื่อมโยง log กับ trace
+			zap.String("span_id", span.SpanID().String()),   // เพิ่ม span_id เพื่อเชื่อมโยง log กับ trace
+		)
+	}
+
+	return log
 }
 ```
 

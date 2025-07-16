@@ -1,5 +1,5 @@
 ---
-title: 'Distributed Logging: ตอนที่ 2 ส่ง Log จาก Go Fiber ไป Loki'
+title: 'Correlation Logging: ตอนที่ 2 ส่ง Log จาก Go Fiber ไป Loki'
 date: '2025-07-04'
 lastmod: '2025-07-04'
 tags: ['go', 'logger', loki, grafana]
@@ -7,9 +7,9 @@ draft: false
 summary: 'รวม Log จากทุกเครื่อง ทุก Container ไว้ที่เดียว'
 ---
 
-# Distributed Logging: ตอนที่ 2 ส่ง Log จาก Go Fiber ไป Loki
+# Correlation Logging: ตอนที่ 2 ส่ง Log จาก Go Fiber ไป Loki
 
-[จากตอนที่แล้ว](https://somprasongd.work/blog/go/distributed-logging-1) เราทำระบบ Log ที่มี **Request ID** เชื่อมโยงทุก Log ของ Request เดียวกันได้แล้ว
+[จากตอนที่แล้ว](https://somprasongd.work/blog/go/correlation-logging-1) เราทำระบบ Log ที่มี **Request ID** เชื่อมโยงทุก Log ของ Request เดียวกันได้แล้ว
 
 แต่เก็บ Log แค่ในไฟล์ หรือ stdout ไม่พอสำหรับ Production จริง เพราะถ้าเครื่องมีหลาย Node จะหา Log แต่ละครั้งวุ่นมาก
 

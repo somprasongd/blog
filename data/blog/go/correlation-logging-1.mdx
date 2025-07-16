@@ -1,13 +1,13 @@
 ---
-title: 'Distributed Logging: ตอนที่ 1 ให้ Log รู้ว่าเกิดจาก Request เดียวกัน'
-date: '2025-07-03'
-lastmod: '2025-07-03'
+title: 'Correlation Logging: ตอนที่ 1 ให้ Log รู้ว่าเกิดจาก Request เดียวกัน'
+date: '2025-07-04'
+lastmod: '2025-07-04'
 tags: ['go', 'logger']
 draft: false
 summary: 'ใช้ Request ID, NGINX Proxy และ Go Fiber'
 ---
 
-# Distributed Logging: ตอนที่ 1 ให้ Log รู้ว่าเกิดจาก Request เดียวกัน
+# Correlation Logging: ตอนที่ 1 ให้ Log รู้ว่าเกิดจาก Request เดียวกัน
 
 เคยไหม? เปิด log ไฟล์มาแล้วต้องกวาดตาดู Stack Trace วนเป็นชั่วโมง กว่าจะเจอว่า Error อันนี้มาจาก Request ไหน แล้วถ้าเจอ Request หนึ่งกระจายยิงหลาย Service ยิ่งวุ่นเข้าไปใหญ่
 
