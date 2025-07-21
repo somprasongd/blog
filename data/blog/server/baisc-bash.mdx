@@ -1,0 +1,771 @@
+---
+title: 'แนะนำ Bash Command สำหรับ Developer มือใหม่'
+date: '2025-07-21'
+lastmod: '2025-07-21'
+tags: ['bash']
+draft: false
+summary: 'บทความนี้ออกแบบมาสำหรับ developer มือใหม่ ที่ไม่คุ้นกับการใช้ command line'
+---
+
+# แนะนำ Bash Command สำหรับ Developer มือใหม่
+
+แม้ว่า GUI จะช่วยให้การเขียนโค้ดง่ายขึ้น แต่เมื่อคุณเริ่มทำงานจริงโดยเฉพาะกับระบบ _backend_, _deployment_, หรือ _CI/CD_ — การใช้ **Terminal** และ **Bash Command** กลายเป็นทักษะที่ขาดไม่ได้
+
+บทความนี้ออกแบบมาสำหรับ developer มือใหม่ ที่ไม่คุ้นกับการใช้ command line โดยใช้โปรเจกต์ Go สมมติชื่อ `myapp` เป็นตัวอย่าง
+
+---
+
+## รายชื่อคำสั่งที่ควรรู้จัก
+
+### พื้นฐานและจัดการไฟล์
+
+- `pwd`, `ls`, `cd`, `touch`, `mkdir`, `rm`, `cat`, `less`, `head`, `tail`, `echo`
+
+### ค้นหาและแก้ไข
+
+- `grep`, `find`, `nano`, `vim`
+
+### รันโปรเจกต์ / ดู process
+
+- `go run`, `go build`, `ps`, `top`, `kill`
+
+### จัดการ Git
+
+- `git clone`, `git status`, `git log`
+
+### ประมวลผลข้อความ
+
+- `awk`, `sed`, `jq`
+
+### การเรียก API และ Network เบื้องต้น
+
+- `curl`, `ping`, `wget`, `netstat`, `lsof`
+
+### จัดการ Environment Variable
+
+- `export`, `.env`, `source`, `$VAR`
+
+### เขียน Shell Script
+
+- `#!/bin/bash`, ตัวแปร, เงื่อนไข (`if`, `loop`)
+
+---
+
+## สมมติฐาน: โปรเจกต์ Go ชื่อ `myapp`
+
+```bash
+git clone https://github.com/yourusername/myapp.git
+cd myapp
+```
+
+---
+
+## 1. พื้นฐานและจัดการไฟล์
+
+### `pwd` – แสดง path ปัจจุบัน
+
+```bash
+pwd
+```
+
+เช่น:
+
+```bash
+/Users/somprasong/projects/myapp
+```
+
+---
+
+### `ls` – แสดงรายการไฟล์
+
+```bash
+ls                        # แสดงรายการไฟล์และโฟลเดอร์ในไดเรกทอรีปัจจุบัน (แบบสั้น)
+ls -lah                   # แสดงรายการไฟล์ทั้งหมด (รวมไฟล์ที่ขึ้นต้นด้วย .)
+                          # -l : แสดงรายละเอียด เช่น permission, owner, size, date
+                          # -a : แสดงไฟล์ทั้งหมด รวมถึงไฟล์ซ่อน (ที่ขึ้นต้นด้วย .)
+                          # -h : แสดงขนาดไฟล์ให้อ่านง่าย (เช่น KB, MB)
+```
+
+---
+
+### `cd` – เปลี่ยนโฟลเดอร์
+
+```bash
+cd cmd         # เปลี่ยนไปยังโฟลเดอร์ย่อยชื่อ cmd (ภายใต้ไดเรกทอรีปัจจุบัน)
+
+cd ..          # ย้อนกลับไปยังโฟลเดอร์แม่ (parent directory)
+
+cd -           # กลับไปยังไดเรกทอรีก่อนหน้าที่เคยอยู่ (toggle ไป toggle มา)
+               # ตัวอย่าง: อยู่ใน /project/cmd แล้ว cd .. ไป /project
+               # หากรัน cd - จะกลับไป /project/cmd อีกครั้ง
+```
+
+---
+
+### `touch` – สร้างไฟล์เปล่า
+
+```bash
+touch config.yaml         # สร้างไฟล์เปล่าชื่อ config.yaml
+                          # หากไฟล์นี้มีอยู่แล้ว จะไม่ทำอะไร (แต่จะอัปเดตเวลาการเข้าถึง)
+```
+
+---
+
+### `mkdir` – สร้างโฟลเดอร์
+
+```bash
+mkdir logs                   # สร้างโฟลเดอร์ชื่อ logs (ถ้ายังไม่มีอยู่)
+mkdir -p logs/2025/july      # สร้างโฟลเดอร์ซ้อนกันหลายชั้นในครั้งเดียว
+                             # -p คือให้สร้างโฟลเดอร์ parent (2025) โดยอัตโนมัติหากยังไม่มี
+```
+
+---
+
+### `rm` – ลบไฟล์หรือโฟลเดอร์
+
+```bash
+rm config.yaml          # ลบไฟล์ชื่อ config.yaml (เฉพาะไฟล์เดียว)
+rm -rf logs/            # ลบโฟลเดอร์ logs และทุกไฟล์/โฟลเดอร์ย่อยภายใน
+                        # -r คือ recursive (ลบทั้งโฟลเดอร์)
+                        # -f คือ force (ไม่ถามยืนยัน)
+```
+
+> คำสั่ง rm -rf ต้องใช้อย่างระมัดระวัง เพราะจะลบทุกอย่างโดยไม่ถาม
+
+---
+
+## 2. คำสั่งอ่าน / ค้น / แก้ไขไฟล์
+
+### `cat` – อ่านไฟล์ทั้งหมด
+
+```bash
+cat README.md
+```
+
+---
+
+### `less` – อ่านไฟล์แบบ scroll
+
+```bash
+less README.md
+```
+
+กด `q` เพื่อออก
+
+---
+
+### `head` และ `tail` – ดูต้นหรือท้ายไฟล์
+
+```bash
+head main.go        # 10 บรรทัดแรก
+tail main.go        # 10 บรรทัดสุดท้าย
+```
+
+---
+
+### `echo` – แสดงข้อความ / ตัวแปร
+
+```bash
+echo "Hello, Go Developer"         # แสดงข้อความ
+echo $HOME                         # แสดงค่าตัวแปร environment
+echo "Build status: $STATUS"       # แสดงค่าตัวแปรที่เรากำหนดเอง
+```
+
+บันทึกค่าไปไฟล์
+
+```bash
+echo "PORT=8080" > .env            # สร้างไฟล์ .env พร้อมกำหนดค่า
+echo "DEBUG=true" >> .env          # เพิ่มบรรทัดใหม่ต่อท้าย
+```
+
+---
+
+## 3. การค้นหาไฟล์ / ข้อความ
+
+### `grep` – ค้นหาคำในไฟล์
+
+```bash
+grep "func main" main.go
+# ค้นหาข้อความ "func main" ในไฟล์ main.go
+# ใช้เพื่อหา function entry point ในภาษา Go
+
+grep -i "http" *.go
+# ค้นคำว่า "http" (ไม่สนว่าเป็นตัวพิมพ์ใหญ่หรือเล็ก) ในทุกไฟล์ .go
+# มีประโยชน์เวลาอยากหาว่าไฟล์ไหนเรียกใช้งาน HTTP client หรือ HTTP handler
+```
+
+---
+
+### `find` – ค้นหาไฟล์
+
+```bash
+find . -name "*.go"
+# ค้นหาไฟล์ทั้งหมดที่ลงท้ายด้วย .go จาก path ปัจจุบันและทุกโฟลเดอร์ย่อย
+# ใช้แทนการ grep ทั้ง project หรือเตรียมทำ build/check ทั่วโปรเจกต์
+
+find . -type f -name "*.yaml"
+# ค้นหาไฟล์ (`-type f`) ที่ชื่อจบด้วย .yaml เท่านั้น
+# เหมาะสำหรับหา config ที่เก็บในหลายๆ โฟลเดอร์ เช่น `config/dev.yaml`, `config/test/app.yaml`
+```
+
+---
+
+## 4. แก้ไขไฟล์จาก terminal
+
+### `nano` – editor แบบง่าย
+
+```bash
+nano config.yaml
+```
+
+เปิดไฟล์ `config.yaml` ขึ้นมาแก้ไขด้วย editor `nano` ซึ่งใช้งานง่าย เหมาะสำหรับมือใหม่
+
+**วิธีบันทึกและออกจาก nano:**
+
+- กด `Ctrl + O` เพื่อบันทึกไฟล์ (O = Output)
+  - กด Enter ยืนยันชื่อไฟล์
+- กด `Ctrl + X` เพื่อออกจาก nano (X = Exit)
+
+---
+
+### `vim` – editor แบบมืออาชีพ
+
+```bash
+vim main.go
+```
+
+เปิดไฟล์ `main.go` ด้วย `vim` ซึ่งเป็น editor ทรงพลังและเร็วมาก เหมาะกับผู้ที่ใช้ terminal เป็นประจำ
+
+**โหมดพื้นฐานใน vim:**
+
+- `Normal mode` – สำหรับสั่งงาน (เปิดโปรแกรมจะเริ่มที่โหมดนี้)
+- `Insert mode` – สำหรับพิมพ์ข้อความ (`i` เพื่อเข้า insert)
+- `Command mode` – สำหรับรันคำสั่ง (`:` เพื่อเข้า)
+
+**วิธีบันทึกและออกจาก vim:**
+
+1. กด `Esc` เพื่อออกจากโหมด insert (กลับไปที่ normal mode)
+2. พิมพ์ `:w` แล้วกด Enter → บันทึกไฟล์ (write)
+3. พิมพ์ `:q` แล้วกด Enter → ออกจาก vim (quit)
+4. หรือใช้รวมกัน `:wq` → บันทึกและออก
+5. ถ้าไม่อยากบันทึกการเปลี่ยนแปลง: พิมพ์ `:q!` → ออกโดยไม่บันทึก
+
+> ถ้าคุณเพิ่งเริ่มใช้ terminal แนะนำเริ่มจาก `nano` ก่อน แล้วค่อยเรียนรู้ `vim` เมื่อเริ่มคุ้นเคยมากขึ้น
+
+---
+
+## 5. รันโปรเจกต์ Go และจัดการ process
+
+### `go run` – รันโปรแกรม
+
+```bash
+go run main.go
+```
+
+---
+
+### `go build` – คอมไพล์แอป
+
+```bash
+go build -o myapp          # คอมไพล์ไฟล์ Go ทั้งโปรเจกต์เป็นไฟล์ไบนารีชื่อ myapp
+                          # -o ระบุชื่อไฟล์เอาต์พุตเอง (output)
+
+./myapp                    # รันไฟล์ไบนารี myapp ที่เพิ่งคอมไพล์ออกมา
+```
+
+---
+
+### `ps`, `top`, `kill` – ดูและจัดการ process
+
+```bash
+ps aux | grep myapp
+# ดูรายชื่อ process ทั้งหมดในระบบ (ps aux)
+# และกรองแสดงเฉพาะบรรทัดที่มีคำว่า "myapp"
+# เพื่อเช็คว่าโปรแกรมชื่อ myapp กำลังรันอยู่หรือไม่ พร้อมแสดง PID (Process ID)
+
+top
+# แสดงสถานะ process แบบ real-time
+# แสดงการใช้งาน CPU, Memory และ process ที่กำลังทำงานมากที่สุด
+# กด 'q' เพื่อออกจากหน้าจอ top
+
+kill -9 <pid>
+# สั่งให้ระบบหยุด process โดยใช้ PID ที่ต้องการ
+# -9 คือส่งสัญญาณ SIGKILL เพื่อบังคับหยุด proce
+```
+
+---
+
+## 6. ใช้ Git เบื้องต้น
+
+```bash
+git status
+# แสดงสถานะปัจจุบันของ repository
+# แจ้งไฟล์ที่มีการเปลี่ยนแปลง ยังไม่ได้ commit หรือไฟล์ที่ยังไม่ถูก track
+
+git add <file>
+# เพิ่มไฟล์เข้าสู่ staging area เพื่อเตรียม commit
+# เช่น git add main.go
+
+git commit -m "ข้อความบรรยาย"
+# บันทึก snapshot ของไฟล์ที่อยู่ใน staging area พร้อมข้อความอธิบาย
+
+git log --oneline
+# แสดงประวัติ commit แบบย่อ สั้นๆ เหมาะสำหรับดูภาพรวม
+
+git branch
+# แสดงรายการสาขา (branches) ใน repository ปัจจุบัน
+
+git checkout <branch-name>
+# สลับไปยัง branch ที่ระบุ
+
+git pull
+# ดึงการเปลี่ยนแปลงล่าสุดจาก remote repository มารวมกับ branch ปัจจุบัน
+
+git push
+# ส่ง commit ที่ทำไปยัง remote repository
+
+git clone <url>
+# คัดลอก (clone) repository จาก remote มายังเครื่องเรา
+```
+
+---
+
+## 7. การจัดการ Environment Variables
+
+### `export` – กำหนดตัวแปรใน session
+
+```bash
+export PORT=8080
+# กำหนดตัวแปร PORT ให้มีค่าเป็น 8080 และ export ไปยัง environment
+# ทำให้โปรแกรมหรือ shell อื่นสามารถเข้าถึงค่าตัวแปรนี้ได้
+
+export DEBUG=true
+# กำหนดตัวแปร DEBUG ให้มีค่า true
+```
+
+---
+
+### เรียกใช้ตัวแปร
+
+```bash
+echo $PORT
+# แสดงค่าของตัวแปร PORT
+# ผลลัพธ์: 8080
+```
+
+---
+
+### การโหลดค่าตัวแปรจากไฟล์ `.env`
+
+```bash
+source .env
+# อ่านและโหลดค่าตัวแปรจากไฟล์ .env เข้าสู่ environment
+# ไฟล์ .env มักใช้เก็บค่าคอนฟิก เช่น PORT=3000, DB_URL=...
+```
+
+หมายเหตุ: ไฟล์ `.env` ควรอยู่ในรูปแบบ `KEY=value` ต่อบรรทัด เช่น
+
+```bash
+PORT=3000
+DEBUG=false
+```
+
+---
+
+### ใช้ตัวแปรร่วมกับคำสั่งอื่น
+
+```bash
+go run main.go
+# ใช้งานโปรแกรม Go โดยอ้างอิงค่าจาก $PORT หรือ $DEBUG ภายในโค้ดได้
+# เช่น os.Getenv("PORT") ในภาษา Go
+```
+
+---
+
+### ลบตัวแปรออกจาก environment
+
+```bash
+unset PORT
+# ลบตัวแปร PORT ออกจาก environment
+
+```
+
+> การใช้ environment variables เป็นเรื่องพื้นฐานที่สำคัญมากในงาน dev เพราะช่วยให้แยก config ออกจาก code และควบคุมการทำงานได้ง่ายในแต่ละ environment (dev, staging, prod)
+
+---
+
+## 8. คำสั่ง Network ที่ควรรู้
+
+### `ping` – ตรวจสอบว่า host online หรือไม่
+
+```bash
+ping google.com
+# ส่ง ICMP request ไปยัง google.com แบบไม่จำกัดจำนวนครั้ง (ต้องกด Ctrl+C เพื่อหยุดเอง)
+
+```
+
+### ตัวเลือก (`option`) ที่นิยมใช้บ่อย
+
+### ส่งจำนวนจำกัด (`c`)
+
+```bash
+ping -c 4 google.com
+# ส่ง ping ไปยัง google.com จำนวน 4 ครั้ง แล้วหยุดอัตโนมัติ
+```
+
+### กำหนดเวลาระหว่างการ ping (`i`)
+
+```bash
+ping -i 0.5 google.com
+# ส่ง ping ทุก ๆ 0.5 วินาที (ค่า default คือ 1 วินาที)
+```
+
+### แสดงเวลารวม (`D`)
+
+```bash
+ping -D -c 2 google.com
+# แสดง timestamp ของแต่ละ reply (ใช้ดู latency แบบมีเวลาประกอบ)
+```
+
+### ตรวจสอบด้วย IP โดยตรง
+
+```bash
+ping 8.8.8.8
+# ใช้ ping ด้วย IP โดยไม่ผ่าน DNS lookup
+```
+
+### ใช้ IPv6 (`6`)
+
+```bash
+ping -6 google.com
+# ใช้ IPv6 แทน IPv4 ในการ ping
+```
+
+---
+
+### หมายเหตุสำหรับการใช้ในระบบ Linux/macOS:
+
+- `ping` บน macOS มี option บางตัวที่ต่างจาก Linux เล็กน้อย เช่น `t` บน macOS คือจำนวนครั้ง แต่บน Linux คือ TTL (time to live)
+- ควรตรวจสอบ `man ping` เพื่อดู option ทั้งหมดในระบบของคุณ
+
+---
+
+### `curl` – เรียก API
+
+```bash
+curl http://localhost:8080/health
+# ส่ง HTTP GET request ไปยัง endpoint /health บน localhost port 8080
+```
+
+### ตัวเลือก (`option`) ที่นิยมใช้บ่อย
+
+### แสดง header ของ response (`i`)
+
+```bash
+curl -i http://localhost:8080/health
+# แสดง HTTP response header ด้วย
+```
+
+### แสดงเฉพาะ HTTP status code (`o /dev/null -w "%{http_code}" -s`)
+
+```bash
+curl -o /dev/null -s -w "%{http_code}\n" http://localhost:8080/health
+# ใช้ตรวจสอบว่า endpoint ตอบกลับด้วย status code อะไร (เช่น 200, 404)
+```
+
+### ส่งข้อมูลแบบ JSON (`X POST -H "Content-Type: application/json" -d`)
+
+```bash
+curl -X POST http://localhost:8080/api \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "1234"}'
+# ส่ง HTTP POST request พร้อม payload JSON
+```
+
+### อ่านค่า header ที่ส่งกลับมา (`I`)
+
+```bash
+curl -I http://localhost:8080/
+# ส่ง HTTP HEAD request (ไม่โหลดเนื้อหา) เพื่อดู header เท่านั้น
+```
+
+### เก็บผลลัพธ์ลงไฟล์ (`o`)
+
+```bash
+curl -o response.json http://localhost:8080/api/data
+# บันทึกผลลัพธ์ของ HTTP response ลงไฟล์ response.json
+```
+
+### ใช้กับไฟล์ `.env` ที่มี token หรือ env var
+
+```bash
+curl -H "Authorization: Bearer $API_TOKEN" http://localhost:8080/api
+# ส่ง header พร้อม token จากตัวแปร environment
+```
+
+---
+
+### ใช้ `curl` ทดสอบ REST API เบื้องต้น
+
+```bash
+curl -X GET http://localhost:8080/users
+curl -X POST http://localhost:8080/users -d '{"name": "go dev"}' -H "Content-Type: application/json"
+```
+
+---
+
+คำสั่ง `curl` เหมาะสำหรับ:
+
+- ทดสอบ health check
+- ตรวจสอบ endpoint ในระบบ microservices
+- Debug API เบื้องต้น
+- ใช้ร่วมกับ `jq` เพื่อจัดรูปแบบ JSON
+
+---
+
+### `wget` – ดาวน์โหลดไฟล์
+
+```bash
+wget http://example.com/file.txt
+# ดาวน์โหลดไฟล์จาก URL ไปยังไฟล์ในเครื่อง
+```
+
+### ตัวเลือก (`option`) ที่ใช้บ่อย
+
+### 1. `O <filename>` – เปลี่ยนชื่อไฟล์ที่บันทึก
+
+```bash
+wget -O myfile.txt http://example.com/file.txt
+# ดาวน์โหลดแล้วเซฟเป็นชื่อ myfile.txt
+```
+
+### 2. `c` – ดาวน์โหลดต่อ (resume) หากไฟล์ยังไม่เสร็จ
+
+```bash
+wget -c http://example.com/largefile.zip
+# หากหลุดระหว่างโหลด สามารถใช้ -c โหลดต่อจากจุดเดิมได้
+```
+
+### 3. `-limit-rate=200k` – จำกัดความเร็วในการดาวน์โหลด
+
+```bash
+wget --limit-rate=200k http://example.com/file.txt
+# ดาวน์โหลดโดยจำกัดความเร็วที่ 200KB/s
+```
+
+### 4. `-no-check-certificate` – ข้ามการตรวจสอบ SSL (ใช้กับ HTTPS)
+
+```bash
+wget --no-check-certificate https://example.com/file.txt
+# ใช้กรณี certificate ไม่ valid เช่น เซิร์ฟเวอร์ dev
+```
+
+### 5. `-user=<username> --password=<password>` – สำหรับเว็บไซต์ที่ต้อง login
+
+```bash
+wget --user=admin --password=secret http://example.com/protected.zip
+# ใช้เมื่อจำเป็นต้องใส่ username/password
+```
+
+### 6. `r` – ดาวน์โหลดแบบ recursive (ทั้ง directory)
+
+```bash
+wget -r http://example.com/files/
+# ดาวน์โหลดทั้ง directory และไฟล์ย่อยทั้งหมด
+```
+
+### 7. `-no-parent` – ไม่ขึ้นไปโหลด path ด้านบน
+
+```bash
+bash
+Copy code
+wget -r --no-parent http://example.com/files/
+# ดาวน์โหลดเฉพาะไฟล์ภายใน path นั้น ไม่ย้อนกลับขึ้นไป directory ข้างบน
+```
+
+### ตัวอย่างการใช้งานร่วมกัน
+
+```bash
+wget -c -O backup.zip http://example.com/backup.zip
+# ดาวน์โหลดไฟล์ backup.zip และสามารถ resume ได้หากหลุด
+```
+
+---
+
+### `netstat` – ดูว่าโปรแกรมไหนเปิดพอร์ต
+
+```bash
+netstat -tulnp
+```
+
+### ความหมายของแต่ละ option:
+
+- `t` = แสดงเฉพาะ TCP
+- `u` = แสดงเฉพาะ UDP
+- `l` = แสดงเฉพาะที่อยู่ในสถานะ “listening” (รอฟังการเชื่อมต่อ)
+- `n` = แสดง IP และพอร์ตเป็นตัวเลข (ไม่แปลงเป็นชื่อ)
+- `p` = แสดงโปรเซส (PID) และชื่อโปรแกรมที่ใช้พอร์ตนั้น _(ต้องใช้ `sudo` ในบางระบบ)_
+
+### ตัวอย่างผลลัพธ์:
+
+```bash
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 0.0.0.0:80              0.0.0.0:*               LISTEN      1234/nginx
+udp        0      0 0.0.0.0:123             0.0.0.0:*
+
+```
+
+---
+
+### `lsof` – ดูว่าใครใช้พอร์ต
+
+```bash
+lsof -i :8080
+# i :8080 หมายถึงให้แสดงเฉพาะโปรเซสที่เปิดใช้งานพอร์ต 8080
+```
+
+### ตัวอย่างผลลัพธ์:
+
+```bash
+COMMAND  PID  USER   FD   TYPE DEVICE SIZE/OFF NODE NAME
+myapp    1234 user   10u  IPv4  12345      0t0  TCP *:http-alt (LISTEN)
+```
+
+คุณสามารถดูว่าแอปอะไรใช้งานพอร์ต และจะนำ `PID` (1234 ในตัวอย่าง) ไปใช้กับ `kill` ได้เช่น
+
+```bash
+kill -9 1234
+```
+
+---
+
+## 9. ประมวลผลข้อความ
+
+### `awk` – ดึง column จากข้อความ
+
+```bash
+awk '{print $1}' access.log     # ดึงข้อมูลคอลัมน์แรกจากไฟล์
+
+# ดึงคอลัมน์ที่ 7 (เช่น URL ที่เรียก):
+awk '{print $7}' access.log
+
+# ดึงหลายคอลัมน์พร้อมกัน:
+awk '{print $1, $7}' access.log
+
+# ใช้กับ pipe (เช่น log จากคำสั่งอื่น):
+cat access.log | awk '{print $1}'
+```
+
+**ตัวอย่างเช่น**
+
+ไฟล์ `access.log` มีข้อมูล
+
+```bash
+192.168.1.1 - - [21/Jul/2025:12:00:00] "GET /index.html HTTP/1.1" 200 1234
+127.0.0.1 - - [21/Jul/2025:12:01:00] "POST /login HTTP/1.1" 302 0
+```
+
+คำสั่ง `awk '{print $1}' access.log` จะได้ผลลัพธ์เป็น
+
+```bash
+192.168.1.1
+127.0.0.1
+```
+
+---
+
+### `sed` – แก้ข้อความในไฟล์
+
+```bash
+sed 's/localhost/127.0.0.1/g' config.yaml
+
+# แทนที่คำว่า localhost ด้วย 127.0.0.1
+# 's/localhost/127.0.0.1/g' =
+#   s = substitute (คำสั่งแทนที่)
+#   localhost = คำที่ต้องการค้นหา
+#   127.0.0.1 = คำที่ใช้แทน
+#   g = global คือ แทนที่ทุกจุดที่เจอในแต่ละบรรทัด
+
+# config.yaml = ชื่อไฟล์ต้นทาง
+```
+
+คำสั่งนี้จะแสดงผลลัพธ์ใหม่ที่มีการแทนที่ `localhost` ด้วย `127.0.0.1` ทุกแห่งในแต่ละบรรทัด แต่ยังไม่บันทึกลงไฟล์
+
+**ถ้าต้องการเขียนกลับลงไฟล์**
+
+ใช้ option `-i` เพื่อแก้ไขในไฟล์จริง:
+
+```bash
+sed -i 's/localhost/127.0.0.1/g' config.yaml
+```
+
+หมายเหตุ: บน macOS อาจต้องใช้ `-i ''`
+
+```bash
+sed -i '' 's/localhost/127.0.0.1/g' config.yaml
+```
+
+---
+
+### `jq` – แก้ไข JSON
+
+```bash
+curl -s http://localhost:8080/status | jq '.'
+
+# jq '.'	แสดง JSON ทั้งก้อนแบบสวยงาม (pretty print)
+
+# ตัวอย่างเพิ่มเติมของ jq
+# jq '.status'	ดึงค่าจาก key status
+
+# jq '.data.name'	ดึงค่าจาก nested key เช่น .data.name
+
+# `jq '.items[].id'` ดึงค่าของฟิลด์ id จากทุก element ที่อยู่ใน array items ของ JSON
+
+# jq '.users[] | select(.active == true)'
+# .users[] วนลูปผ่านแต่ละ element ใน array ชื่อ users
+# select(.active == true) กรอง (filter) เฉพาะ element ที่มี field active เท่ากับ true
+```
+
+---
+
+## 10. เขียน Shell Script เบื้องต้น
+
+ไฟล์: `build.sh`
+
+```bash
+#!/bin/bash
+
+echo "Building myapp..."
+go build -o myapp
+
+if [ $? -eq 0 ]; then
+  echo "✅ Build success"
+else
+  echo "❌ Build failed"
+fi
+```
+
+ให้สิทธิ์รัน:
+
+```bash
+chmod +x build.sh
+./build.sh
+```
+
+---
+
+## 11. เสริม productivity
+
+```bash
+history                # ดูคำสั่งย้อนหลัง
+!!                     # รันคำสั่งล่าสุด
+alias gs="git status"  # สร้าง shortcut คำสั่ง
+```
+
+---
+
+## สรุป
+
+Developer มือใหม่ไม่จำเป็นต้องจำคำสั่งทั้งหมดในคราวเดียว แต่ควรเริ่มจากคำสั่งที่ **ใช้กับงานจริงในโปรเจกต์ตัวเอง** เช่น แก้ config, รันแอป, แสดงค่าตัวแปร, แก้ .env, หรือดู log จาก production
+
+เมื่อคุ้นมือแล้ว คุณจะเริ่มใช้ `bash` เป็นเครื่องมือสร้างระบบ build, deploy, หรือ monitoring script ที่ยืดหยุ่นและควบคุมได้เอง 100%
