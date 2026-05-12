@@ -1,0 +1,99 @@
+---
+title: 'Database คืออะไร'
+date: '2023-03-08'
+lastmod: '2023-03-08'
+tags: ['database']
+draft: false
+summary: 'Database คืออะไร และมีกี่ประเภท'
+---
+
+# Database คืออะไร
+
+พอดีมีไปสอนเรื่องการสร้าง REST API ติดต่อกับระบบฐานข้อมูล (Database) แต่มีน้องๆ หลายคนที่ยังไม่เคยใช้งาน Database มาก่อน เลยถือโอกาศเขียนบทความนี้เพื่ออธิบายว่า Database คืออะไร
+
+## เริ่มจาก Data คืออะไร
+
+Data ก็คือ ข้อมูล เช่น จากรูปด้านล่าง ข้อมูลของคนมี ชื่อ, เพศ และอีเมล
+
+<div className="flex justify-center">
+  <div>![Data](/static/images/db/data.png)</div>
+</div>
+
+ซึ่ง Data นั้นจะเป็นข้อมูลอะไรก็ได้ ไม่ว่าจะเป็นข้อความ รูปภาพ เพลง หรือวิดีโอ
+
+## แล้ว Database คืออะไร
+
+Database ก็คือ ที่จัดเก็บ Data ทั้งหลายไม่ว่าจะเป็นข้อความ รูปภาพ เพลง หรือวิดีโอ โดยจะเก็บไว้ในระบบคอมพิวเตอร์
+
+<div className="flex justify-center">
+  <div>![Database](/static/images/db/database.png)</div>
+</div>
+
+โดยการใช้งาน Database ไม่ว่าจะเป็นการทำงานโดยตรงกับ Database หรือใช้งานผ่าน Applications อื่นๆ นั้น เราจะต้องใช้งานผ่านระบบ DBMS (Database Management System)
+
+<div className="flex justify-center">
+  <div>![DBMS](/static/images/db/dbms.png)</div>
+</div>
+
+**ตัวอย่างของ DBMS**
+
+- PostgreSQL
+- MySQL
+- MongoDB
+- Neo4j
+- Cassandra
+
+ซึ่งในปัจจุบันนั้นจะมี Database อยู่ 2 ประเภท
+
+1. **Relational Database** คือ ฐานข้อมูลที่มีโครงสร้างชัดเจน ในรูปแบบของตารางประกอบด้วย Row กับ Column เช่น PostgreSQL, MySQL, ORACLE Database
+
+{' '}
+
+<div className="flex justify-center">
+  <div>![Database](/static/images/db/table.png)</div>
+</div>
+
+และแต่ละตารางจะมี ID ที่ไม่ซ้ำกันเรียกว่า Primary Key ซึ่งถ้า ID นี้ไปอยู่ในตารางอื่นจะเรียกว่า Foreign Key ทำให้หาความสัมพันธ์ระหว่างตารางได้
+
+{' '}
+
+<div className="flex justify-center">
+  <div>![Database](/static/images/db/relational.png)</div>
+</div>
+
+รูปจาก [https://www.codecademy.com/resources/docs/general/relational-database](https://www.codecademy.com/resources/docs/general/relational-database)
+
+2. **Non-Relational Database** คือ ฐานข้อมูลที่ตรงกันข้ามกับ Relational Database แบ่งออกเป็น 4 ประเภท
+
+   1. **Document-oriented Database** จะจัดเก็บข้อมูลในรูปแบบ Document โดยจะสร้าง key ขึ้นมาว่าจะเก็บข้อมูลอะไร โดยข้อมูลเดี่ยวๆ เช่น ข้อความ ตัวเลข หรือจะมีโครงสร้างซับซ้อนก็ได้
+
+      <div className="flex justify-center">
+        <div>![Database](/static/images/db/mongo.png)</div>
+      </div>
+
+   2. **Key-Value Database** จะจัดเก็บข้อมูลโดยมี key ที่ไม่ซ้ำกัน ที่อ้างอิงถึงค่า value แค่ 1 ตัว
+
+      <div className="flex justify-center">
+        <div>![Database](/static/images/db/redis.png)</div>
+      </div>
+
+      รูปจาก [https://www.scylladb.com/glossary/key-value-store/](https://www.scylladb.com/glossary/key-value-store/)
+
+   3. **Wide-Column Store** ฐานข้อมูลจะจัดเก็บเป็นตาราง มี rows และ columns แต่จะตารางกับ relational database ที่ในภายในตารางเดียวกันนั้นแต่ละ row สามารถมีจำนวน columns ที่ไม่เท่าได้
+
+      <div className="flex justify-center">
+        <div>![Database](/static/images/db/cassandra.png)</div>
+      </div>
+
+   4. **Graph Database** เอาไว้หาความสัมพันธ์ของข้อมูล ประกอบด้วย
+
+      1. Nodes → วัตถุ สิ่งของ หรือ objects ต่างๆในโลกความจริง เช่น person, product
+      2. Relationships → ความสัมพันธ์ระหว่าง objects ที่เราสร้างขึ้นมา
+
+      <div className="flex justify-center">
+        <div>![Database](/static/images/db/neo4j.png)</div>
+      </div>
+
+      ***
+
+      ทั้งหมดนี้ก็คือระบบฐานข้อมูลที่เราใช้งานกันอยู่ในปัจจุบันครับ

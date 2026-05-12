@@ -1,0 +1,287 @@
+---
+title: 'ทำไมต้องใช้ Database Transaction?'
+date: '2025-06-27'
+lastmod: '2025-06-27'
+tags: ['database', 'transaction']
+draft: false
+summary: 'เข้าใจ ACID, Lock และ Deadlock ผ่านตัวอย่างการโอนเงินด้วย PostgreSQL'
+---
+
+# ทำไมต้องใช้ Database Transaction?
+
+ในการพัฒนาระบบที่เกี่ยวข้องกับข้อมูลสำคัญ เช่น การเงิน หนึ่งในสิ่งที่ขาดไม่ได้คือการใช้ **Database Transaction** เพื่อให้มั่นใจว่าข้อมูลจะถูกจัดการอย่างถูกต้องและปลอดภัย โดยเฉพาะในสถานการณ์ที่มีหลายคำสั่ง SQL ทำงานร่วมกัน เช่น "การโอนเงิน" ที่ต้องอัปเดตยอดเงินสองบัญชีพร้อมกัน
+
+ในบทความนี้ เราจะพาคุณเข้าใจว่าเหตุใดการใช้ **Transaction** จึงสำคัญ ผ่านการเรียนรู้แนวคิด **ACID**, **Lock**, และ **Deadlock** ด้วยตัวอย่างจากการโอนเงินระหว่างบัญชีด้วย PostgreSQL
+
+---
+
+## โครงสร้างฐานข้อมูล: `accounts` และ `transactions`
+
+```sql
+CREATE TABLE public.accounts (
+	id serial4 NOT NULL,
+	"name" text NOT NULL,
+	balance numeric NOT NULL,
+	CONSTRAINT accounts_pkey PRIMARY KEY (id)
+);
+
+CREATE TABLE public.transactions (
+	id serial4 NOT NULL,
+	from_account_id int4 NULL,
+	to_account_id int4 NULL,
+	amount numeric NOT NULL,
+	created_at timestamp DEFAULT now() NULL,
+	CONSTRAINT transactions_pkey PRIMARY KEY (id),
+	CONSTRAINT transactions_from_account_id_fkey FOREIGN KEY (from_account_id) REFERENCES public.accounts(id),
+	CONSTRAINT transactions_to_account_id_fkey FOREIGN KEY (to_account_id) REFERENCES public.accounts(id)
+);
+```
+
+---
+
+## ปัญหา: การโอนเงินโดยไม่ใช้ Transaction
+
+สมมุติว่าเราต้องโอนเงิน 500 บาทจากบัญชี A ไปยังบัญชี B โดยใช้คำสั่ง SQL ต่อไปน
+
+```sql
+UPDATE accounts SET balance = balance - 500 WHERE id = 1;
+UPDATE accounts SET balance = balance + 500 WHERE id = 2;
+INSERT INTO transactions (from_account_id, to_account_id, amount)
+VALUES (1, 2, 500);
+```
+
+ถ้าเกิดเหตุขัดข้องหลังอัปเดตบัญชี A แล้ว (เช่น network error หรือ crash) แต่ยังไม่ทันเพิ่มเงินให้บัญชี B — เงิน 500 บาทจะ “หายไปจากระบบ” ซึ่งเป็นปัญหาหนักมากในระบบการเงิน
+
+---
+
+## วิธีแก้: ใช้ Database Transaction
+
+```sql
+BEGIN;
+
+UPDATE accounts SET balance = balance - 500 WHERE id = 1;
+UPDATE accounts SET balance = balance + 500 WHERE id = 2;
+
+INSERT INTO transactions (from_account_id, to_account_id, amount)
+VALUES (1, 2, 500);
+
+COMMIT;
+```
+
+หากคำสั่งใดล้มเหลว PostgreSQL จะไม่ `COMMIT` และเราสามารถ `ROLLBACK` เพื่อยกเลิกทุกคำสั่งที่ทำไปแล้ว ทำให้ข้อมูลไม่เสียหาย
+
+---
+
+## เข้าใจ ACID: หัวใจของ Transaction
+
+ACID คือคุณสมบัติหลักของ Database Transaction ที่ทำให้ข้อมูลเชื่อถือได้ ซึ่งย่อมาจาก
+
+- **Atomicity** – ทุกคำสั่งใน transaction ต้องสำเร็จทั้งหมด หรือไม่สำเร็จเลย
+- **Consistency** – หลัง transaction สำเร็จ ฐานข้อมูลยังคงถูกต้องตามกฎ เช่น balance ≥ 0
+- **Isolation** – แต่ละ transaction ไม่รบกวนกันระหว่างทำงานพร้อมกัน
+- **Durability** – เมื่อ `COMMIT` แล้ว ข้อมูลจะถูกบันทึกถาวร แม้ระบบดับ
+
+**ตัวอย่าง:** หากมีคนโอนเงินจากบัญชีเดียวกันสองคนพร้อมกัน PostgreSQL ต้องมั่นใจว่าไม่มีการขัดแย้ง หรือข้อมูลผิดเพี้ยน เช่นเงินติดลบ
+
+---
+
+## การล็อกข้อมูล (Database Lock)
+
+PostgreSQL จะล็อก **row-level** อัตโนมัติเมื่อมี `UPDATE`:
+
+```sql
+UPDATE accounts SET balance = balance - 500 WHERE id = 1;
+```
+
+แถวของบัญชี `id = 1` จะถูกล็อกไว้จนกว่า transaction จะจบ เพื่อป้องกันไม่ให้ transaction อื่นเข้ามาแก้ไขบัญชีเดียวกันพร้อมกัน
+
+### สถานการณ์: `select` ก่อน `update`
+
+แต่ในกรณีที่ใน application logic มีการดึงข้อมูล (`select`) ขึ้นมาก่อน แล้วทำการแก้ไขค่า เสร็จแล้วบันทึกกลับไปในฐานข้อมูล (`update`) แล้วเกิด transaction เข้ามาแก้ไขบัญชีเดียวกันพร้อมกัน เช่น
+
+```sql
+-- Transaction A
+BEGIN;
+SELECT id, "name", balance FROM accounts WHERE id = 1;
+id|name|balance|
+--+----+-------+
+ 1|A   |   1000|
+
+UPDATE accounts SET balance = 1000 - 500 WHERE id = 1;
+
+COMMIT;
+
+-- Transaction B (เกิดขึ้นพร้อมกัน)
+BEGIN;
+SELECT id, "name", balance FROM accounts WHERE id = 1;
+id|name|balance|
+--+----+-------+
+ 1|A   |   1000|
+
+UPDATE accounts SET balance = 1000 - 500 WHERE id = 1;
+
+COMMIT;
+```
+
+ในสถานการณ์นี้จะทำให้ค่า `balance` ผิด แทนที่จะเหลือ 0 แต่กลับเหลือ 500 แทน
+
+**วิธีแก้:** ใช้ `SELECT FOR UPDATE` เพื่อล็อกก่อน
+
+```sql
+-- Transaction A
+BEGIN;
+SELECT id, "name", balance FROM accounts WHERE id = 1 FOR UPDATE;
+id|name|balance|
+--+----+-------+
+ 1|A   |   1000|
+
+UPDATE accounts SET balance = 1000 - 500 WHERE id = 1;
+
+COMMIT;
+
+-- Transaction B (เกิดขึ้นพร้อมกัน)
+BEGIN;
+SELECT id, "name", balance FROM accounts WHERE id = 1 FOR UPDATE;
+-- จะหยุดรอจนกว่า Transaction A จะ COMMIT หรือ ROLLBACK
+id|name|balance|
+--+----+-------+
+ 1|A   |   500|
+
+UPDATE accounts SET balance = 500 - 500 WHERE id = 1;
+
+COMMIT;
+```
+
+---
+
+## Deadlock: ล็อกขัดกันเอง
+
+### สถานการณ์ที่ 1:
+
+- **Transaction A**: โอน A ➜ B
+- **Transaction B**: โอน B ➜ A
+
+```sql
+-- Transaction A
+BEGIN;
+UPDATE accounts SET balance = balance - 500 WHERE id = 1;
+UPDATE accounts SET balance = balance + 500 WHERE id = 2;
+-- รอ เพราะ lock จาก Transaction B
+
+-- Transaction B (เกิดขึ้นพร้อมกัน)
+BEGIN;
+UPDATE accounts SET balance = balance - 300 WHERE id = 2;
+UPDATE accounts SET balance = balance + 300 WHERE id = 1;
+-- ERROR: deadlock detected
+```
+
+### สถานการณ์ที่ 2:
+
+ถ้า `INSERT` ไปยัง `transactions` ซึ่งมี Foreign Key อ้างถึง `accounts.id` และหากมีอีก transaction กำลัง `UPDATE accounts` อยู่ อาจเกิด Deadlock ได้
+
+เช่น สมมุติให้เปลี่ยนลำดับให้บันทึก `transactions` ก่อน แล้วมาดึงข้อมูลข้อมูล `accounts` ก่อน `update`
+
+```sql
+-- Transaction A
+BEGIN;
+
+INSERT INTO transactions (from_account_id, to_account_id, amount)
+VALUES (1, 2, 500);
+
+SELECT id, "name", balance FROM accounts WHERE id = 1 FOR UPDATE;
+-- หยุดรอ เพราะ INSERT INTO transactions จาก Transaction B
+
+-- Transaction B (เกิดขึ้นพร้อมกัน)
+BEGIN;
+
+INSERT INTO transactions (from_account_id, to_account_id, amount)
+VALUES (1, 2, 500);
+
+SELECT id, "name", balance FROM accounts WHERE id = 1 FOR UPDATE;
+-- ERROR: deadlock detected
+```
+
+จากสถานการณ์ที่ยกตัวอย่างมา ทั้งสอง transaction จะล็อกบัญชีฝั่งของตนเองก่อน แล้วรอกันข้าม — ทำให้เกิด **Deadlock** PostgreSQL จะเลือก kill transaction ใด transaction หนึ่งเพื่อยกเลิก
+
+---
+
+## วิธีป้องกัน Deadlock
+
+1. ล็อก row ตามลำดับเสมอ
+
+   ใช้ `ORDER BY id` เพื่อให้ทุก transaction ล็อกบัญชีตามลำดับเดียวกัน เช่น `id จากน้อยไปมาก`
+
+2. ล็อก row ก่อนอัปเดตด้วย `FOR NO KEY UPDATE`
+
+   หากไม่ล็อก row ล่วงหน้า PostgreSQL จะพยายามล็อกเองในตอนที่ `INSERT` ไปยัง `transactions` ซึ่งมี Foreign Key อ้างถึง `accounts.id`
+
+   หากอีก transaction กำลัง `UPDATE accounts` อยู่ อาจเกิด Deadlock ได้
+
+   **`FOR NO KEY UPDATE`** คือระดับ lock ที่
+
+   - ป้องกันการ update, delete หรือ insert ที่อ้าง foreign key
+   - เบากว่า `FOR UPDATE` แต่ปลอดภัยสำหรับกรณีแบบนี้
+   - เหมาะสำหรับ row ที่เราจะอัปเดต (แต่ไม่เปลี่ยนค่า primary key)
+
+3. ควร `UPDATE accounts` ก่อน แล้วค่อย `INSERT transactions`
+
+   ช่วยลดความเสี่ยงในการเกิด Deadlock เพราะว่าหากคุณ `INSERT` ก่อน และมี Foreign Key ไปที่ `accounts` → PostgreSQL จะพยายามล็อก row เหล่านั้นก่อน ถ้าคำสั่ง `UPDATE accounts` มาทีหลัง อาจเกิด **Deadlock** ได้ (โดยเฉพาะถ้าอีก transaction ล็อกกลับกัน)
+
+**ตัวอย่าง**
+
+```sql
+-- Transaction A
+BEGIN;
+
+-- 1. ล็อกบัญชีล่วงหน้าเพื่อลดโอกาส deadlock
+SELECT id FROM accounts
+WHERE id IN (1, 2)
+ORDER BY id
+FOR NO KEY UPDATE;
+
+-- 2. อัปเดตยอดเงิน
+UPDATE accounts SET balance = balance - 500 WHERE id = 1;
+UPDATE accounts SET balance = balance + 500 WHERE id = 2;
+
+-- 3. บันทึกธุรกรรม
+INSERT INTO transactions (from_account_id, to_account_id, amount)
+VALUES (1, 2, 500);
+
+COMMIT;
+
+-- Transaction B (เกิดขึ้นพร้อมกัน)
+BEGIN;
+
+SELECT id FROM accounts
+WHERE id IN (1, 2)
+ORDER BY id
+FOR NO KEY UPDATE;
+-- รอจนกว่า Transaction A จะถูก COMMIT หรือ ROLLBACK
+
+UPDATE accounts SET balance = balance - 300 WHERE id = 2;
+UPDATE accounts SET balance = balance + 300 WHERE id = 1;
+
+INSERT INTO transactions (from_account_id, to_account_id, amount)
+VALUES (2, 1, 300);
+
+COMMIT;
+```
+
+---
+
+## ตารางเปรียบเทียบระดับ Lock (ใน SELECT ... FOR ...)
+
+| Lock Mode           | ใช้ในกรณี               | ป้องกันไม่ให้ใครทำอะไรได้บ้าง          |
+| ------------------- | ----------------------- | -------------------------------------- |
+| `FOR UPDATE`        | อัปเดต row              | ห้ามใคร update/delete แถวนี้           |
+| `FOR NO KEY UPDATE` | อัปเดต row (ไม่แตะ key) | ห้าม insert ที่อ้างถึง row นี้ (FK)    |
+| `FOR SHARE`         | อ่านอย่างเดียว          | ห้ามใคร delete หรือ update แถวนี้      |
+| `FOR KEY SHARE`     | อ่านพร้อมอ้าง FK        | ห้ามใครเปลี่ยน primary key หรือ delete |
+
+---
+
+## สรุป
+
+การใช้ **Database Transaction** เป็นสิ่งสำคัญอย่างยิ่งในระบบที่ต้องการความถูกต้องของข้อมูล โดยเฉพาะระบบการเงิน โดย PostgreSQL มีคุณสมบัติรองรับ ACID อย่างครบถ้วน พร้อมระบบ Lock และกลไกจัดการ Deadlock อัตโนมัติ
+
+**หากละเลยการใช้ Transaction อาจนำไปสู่ความเสียหายทางข้อมูล และความไม่ถูกต้องที่ยากจะแก้ไขภายหลัง**

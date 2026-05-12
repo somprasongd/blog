@@ -1,0 +1,336 @@
+---
+title: 'Correlation Logging: ตอนที่ 2 ส่ง Log จาก Go Fiber ไป Loki'
+date: '2025-07-04'
+lastmod: '2025-07-04'
+tags: ['go', 'logger', loki, grafana]
+draft: false
+summary: 'รวม Log จากทุกเครื่อง ทุก Container ไว้ที่เดียว'
+---
+
+# Correlation Logging: ตอนที่ 2 ส่ง Log จาก Go Fiber ไป Loki
+
+[จากตอนที่แล้ว](https://somprasongd.work/blog/go/correlation-logging-1) เราทำระบบ Log ที่มี **Request ID** เชื่อมโยงทุก Log ของ Request เดียวกันได้แล้ว
+
+แต่เก็บ Log แค่ในไฟล์ หรือ stdout ไม่พอสำหรับ Production จริง เพราะถ้าเครื่องมีหลาย Node จะหา Log แต่ละครั้งวุ่นมาก
+
+วิธีแก้คือใช้ **Log Aggregation** — รวม Log จากทุกเครื่อง ทุก Container ไว้ที่เดียว เช่น **Grafana Loki**
+
+ในตอนนี้เราจะทำให้ Log จาก Go Fiber ถูกส่งไปที่ Loki แล้วดูผ่าน Grafana ได้แบบ Real-Time
+
+---
+
+## Stack ที่ใช้
+
+- **Go Fiber** + **Zap Logger** (จากตอนที่แล้ว)
+- **Promtail** สำหรับดึง Log ไฟล์แล้วส่งไป Loki
+- **Loki** เป็น Log Aggregator
+- **Grafana** เป็นหน้าจอ Dashboard
+- **Docker Compose** สำหรับรันทุกตัวพร้อมกัน
+
+---
+
+## เป้าหมาย
+
+- ทุก Request ใน Fiber → Log แบบ stdout
+- Docker Engine จะเก็บ stdout ลงไฟล์
+- Promtail อ่านไฟล์แล้ว Forward ไป Loki
+- Grafana อ่าน Loki แล้วแสดง Log ตาม `request_id`
+
+---
+
+## โครงสร้างไฟล์โปรเจกต์
+
+```
+project/
+ ├── cmd/
+ │   └── main.go
+ ├── middleware/
+ │   └── request_context.go
+ ├── handler/
+ │   └── user_handler.go
+ ├── service/
+ │   └── user_service.go
+ ├── repository/
+ │   └── user_repository.go
+ ├── Dockerfile
+ ├── docker-compose.yml <-- แก้ไข
+ ├── nginx.conf
+ ├── promtail-config.yml <-- เพิ่ม
+ ├── go.mod
+ └── go.sum
+```
+
+---
+
+## 1. ให้ Docker Engine จะเก็บ stdout/stderr ลงไฟล์แบบ JSON
+
+แก้ไขไฟล์ `docker-compose.yml`
+
+```yaml
+services:
+  nginx:
+    # ...
+
+  app:
+    build: .
+    container_name: backend-app
+    # เก็บ log เป็นไฟล์ JSON
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '5'
+```
+
+**กำหนด Logging Driver**
+
+- `driver: "json-file"` หมายความว่า container จะเก็บ log เป็นไฟล์ JSON บน disk (นี่คือ default ของ Docker)
+- ทุก log ที่ container พิมพ์ออกมาที่ stdout/stderr จะถูกเก็บเป็น JSON event ในไฟล์
+
+**กำหนดขนาดและจำนวนไฟล์ log (log rotation)**
+
+- `max-size: "10m"` → เมื่อ log ไฟล์ใหญ่เกิน 10 MB Docker จะเริ่มหมุนไฟล์ (rotate)
+- `max-file: "5"` → Docker จะเก็บไฟล์ log ได้สูงสุด 5 ไฟล์ (ไฟล์หลัก + ไฟล์ rotate 4 ไฟล์) ถ้าเกินก็ลบทิ้งไฟล์เก่าสุด
+
+---
+
+## 2. Promtail Config: อ่านไฟล์แล้วส่งไป Loki
+
+สร้างไฟล์ `promtail-config.yml`
+
+```yaml
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker-logs
+    docker_sd_configs:
+      - host: unix:///var/run/docker.sock
+        refresh_interval: 5s
+        filters:
+          - name: label
+            values: ['logging=promtail']
+
+    relabel_configs:
+      - source_labels: ['__meta_docker_container_name']
+        regex: '/(.*)'
+        target_label: 'container'
+      - source_labels: ['__meta_docker_container_log_stream']
+        target_label: 'logstream'
+      - source_labels: ['__meta_docker_container_label_logging_jobname']
+        target_label: 'job'
+
+    pipeline_stages:
+      - docker: {}
+      - json:
+          expressions:
+            app_name: app_name
+      - labels:
+          app: app_name
+```
+
+**server**
+
+```yaml
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+```
+
+- Promtail จะเปิด HTTP server ที่พอร์ต **9080** เพื่อใช้ health check, metrics, หรือ config reload.
+- ปิด gRPC listener (`grpc_listen_port: 0`) → ไม่ใช้ gRPC สำหรับรับ log จาก agent อื่น ๆ\
+
+**positions**
+
+```yaml
+positions:
+  filename: /tmp/positions.yaml
+```
+
+- Promtail จะเก็บไฟล์ **positions.yaml** ไว้เพื่อจำว่าอ่าน log ไฟล์/stream ไปถึงไหนแล้ว
+- ถ้า Promtail รีสตาร์ท จะไม่อ่าน log ซ้ำตั้งแต่ต้น แต่จะ resume ต่อจากตำแหน่งล่าสุด
+
+**clients**
+
+```yaml
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+```
+
+- จุดหมายของ log → ส่ง log ทั้งหมดไปที่ **Loki** ซึ่งรันอยู่ที่ `http://loki:3100`
+- `loki` คือชื่อ container (เช่น ใน `docker-compose` มี `service: loki`)
+
+**scrape_configs**
+
+```yaml
+scrape_configs:
+  - job_name: docker-logs
+```
+
+- ตั้งชื่อ job ว่า **docker-logs** → เพื่อระบุว่า job นี้มีหน้าที่ scrape log จาก Docker containers
+
+**docker_sd_configs**
+
+```yaml
+docker_sd_configs:
+  - host: unix:///var/run/docker.sock
+    refresh_interval: 5s
+    filters:
+      - name: label
+        values: ['logging=promtail']
+```
+
+- ใช้ **Docker Service Discovery** → ดึงรายการ containers ผ่าน Docker API (`/var/run/docker.sock`)
+- **refresh_interval: 5s** → เช็ค container ใหม่ทุก 5 วินาที
+- **filters** → จะ scrape เฉพาะ containers ที่มี label `logging=promtail` เท่านั้น ถ้าไม่มี label นี้จะไม่เก็บ log
+
+**relabel_configs**
+
+```yaml
+relabel_configs:
+  - source_labels: ['__meta_docker_container_name']
+    regex: '/(.*)'
+    target_label: 'container'
+  - source_labels: ['__meta_docker_container_log_stream']
+    target_label: 'logstream'
+  - source_labels: ['__meta_docker_container_label_logging_jobname']
+    target_label: 'job'
+```
+
+- ใช้ **relabel_configs** เพื่อสร้าง **labels** สำหรับ log event
+  - `__meta_*` → เป็น metadata จาก Docker discovery
+  - แปลงชื่อ container → เป็น label `container`
+  - แยก log stream (`stdout` / `stderr`) → เป็น label `logstream`
+  - ถ้า container มี label เช่น `logging_jobname=myapp` → จะ map เป็น label `job`
+
+**pipeline_stages**
+
+```yaml
+pipeline_stages:
+  - docker: {}
+  - json:
+      expressions:
+        app_name: app_name
+  - labels:
+      app: app_name
+```
+
+- เป็น **pipeline** สำหรับแปลง log ก่อนส่งไป Loki:
+  1. `docker: {}` → แยก JSON จาก Docker log driver (`json-file`) ให้ออกมาเป็น field
+  2. `json:` → ดึงค่า `app_name` จาก payload JSON ใน log (ถ้ามี)
+  3. `labels:` → สร้าง label ชื่อ `app` โดยใช้ค่า `app_name` ที่ดึงมา
+
+---
+
+## 3. Docker Compose: Loki + Promtail + Grafana
+
+แก้ไฟล์ `docker-compose.yml`
+
+```yaml
+services:
+  nginx:
+    image: nginx:latest
+    container_name: nginx-proxy
+    ports:
+      - '80:80'
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+
+  app:
+    build: .
+    container_name: backend-app
+    logging:
+      driver: 'json-file'
+      options:
+        max-size: '10m'
+        max-file: '5'
+    # เพิ่ม label สำหรับ filtering logs
+    labels:
+      logging: 'promtail'
+      logging_jobname: 'containerlogs'
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - '3100:3100'
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - ./promtail-config.yml:/etc/promtail/promtail-config.yml
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: -config.file=/etc/promtail/promtail-config.yml
+    depends_on:
+      - loki
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - '3000:3000'
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana-data:/var/lib/grafana
+    depends_on:
+      - loki
+
+volumes:
+  grafana-data:
+```
+
+---
+
+## 4. ตั้งค่า Grafana
+
+1. เปิด Grafana `http://localhost:3001`
+   - Login: `admin` / `admin`
+2. ไปที่ **Configuration → Data Sources → Add data source**
+3. เลือก **Loki**, ตั้ง URL เป็น `http://loki:3100`
+4. Save & Test
+5. ไปที่ Explore → เลือก Data Source → เลือก `{app="demo-logger"}`
+6. ลองยิง Request:
+
+   ```bash
+   curl http://localhost/users/1
+   ```
+
+7. ดู Log ใน Grafana จะเห็นทุก Log พร้อม `request_id`
+
+---
+
+## จุดสำคัญ
+
+- Promtail ทำงานแบบ Agent คอย tail ไฟล์ Log แล้ว Push ให้ Loki
+- Zap สร้าง Log ในรูปแบบ JSON → Loki ดึง label หรือ filter ได้ดีมาก
+- การค้น Log ตาม `request_id` ใน Grafana แค่ใช้ Loki Query เช่น:
+  ```arduino
+  {app="demo-logger"} |= "request_id"
+  ```
+
+---
+
+## สรุป
+
+นี่คือ Stack Logging ขนาดย่อมแต่ใช้งานได้จริง:
+
+- Fiber + Zap → สร้าง Log เป็น JSON
+- Docker Engine → เขียน Log ไฟล์
+- Promtail → Agent ดึง Log ไฟล์
+- Loki → Aggregator เก็บ Log ทุก Container
+- Grafana → Query Log ตาม Request ID
+
+ทั้งหมดนี้รันด้วย Docker Compose พร้อมใช้งานทันที

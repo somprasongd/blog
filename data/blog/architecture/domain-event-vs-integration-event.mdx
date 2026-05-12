@@ -1,0 +1,81 @@
+---
+title: 'ลด Coupling และแยก Concern ด้วย Domain Event และ Integration Event'
+date: '2025-06-06'
+lastmod: '2025-06-06'
+tags: ['architecture', 'ddd', 'go']
+draft: false
+summary: 'ลด Coupling และแยก Concern ด้วย Domain Event และ Integration Event'
+---
+
+# ลด Coupling และแยก Concern ด้วย Domain Event และ Integration Event
+
+ในระบบที่ออกแบบแบบ DDD (Domain-Driven Design) หรือ Modular Monolith หลายคนมักเริ่มต้นด้วยการเขียนโค้ดในรูปแบบ **Imperative Style** — ซึ่งตรงไปตรงมาแต่ coupling สูง และแยก concern ได้ไม่ชัดเจน
+
+ยกตัวอย่างเช่น ใน `CustomerService` ที่รับผิดชอบสร้างลูกค้าใหม่ เราอาจเขียน logic ประมาณนี้
+
+```go
+if err := h.custRepo.Create(ctx, customer); err != nil {
+	return err
+}
+
+// ส่งอีเมลต้อนรับทันที
+if err := h.notiSvc.SendEmail(customer.Email, "Welcome!", ...); err != nil {
+	return err
+}
+```
+
+แม้โค้ดนี้จะดูเรียบง่าย แต่จริงๆ แล้วมันแฝงปัญหาหลายอย่างไว้ เช่น
+
+- **Coupling สูง**: Command Handler รู้จัก Service สำหรับส่งอีเมลโดยตรง
+- **ยากต่อการขยาย/ปรับปรุง**: หากในอนาคตอยากส่ง SMS หรือบันทึก event log เพิ่มเติม ต้องแก้ handler ตรงนี้
+- **ยากต่อการทดสอบ**: การ mocking พฤติกรรมที่เกิด "หลัง" การสร้าง customer ทำได้ยาก
+
+## ย้าย Logic ที่ไม่ใช่ Core Concern ออกด้วย Event
+
+ทางออกที่ดีกว่า คือการใช้แนวคิด **Domain Events** และ **Integration Events** เพื่อแยก concern ต่างๆ ออกจาก core business logic
+
+### Domain Event คืออะไร?
+
+Domain Event คือสิ่งที่เกิดขึ้นใน domain ของเรา เช่น `CustomerCreated`, `OrderCancelled` เป็นต้น — โดย publish และ handle อยู่ภายใน module เดียวกัน
+
+เช่น เมื่อสร้าง `Customer` สำเร็จ ก็สามารถเพิ่ม logic เช่นนี้
+
+```go
+customer.AddDomainEvent(CustomerCreated{
+	ID:    customer.ID,
+	Email: customer.Email,
+})
+```
+
+จากนั้น ระบบจะมี **Domain Event Dispatcher** ที่ทำหน้าที่ตามหา handler ที่เหมาะสมมาทำงานต่อ — โดยไม่กระทบ core logic
+
+### Integration Event คืออะไร?
+
+เมื่อมีบาง domain event ที่เราต้อง "แจ้ง" ไปยัง **ระบบอื่น** หรือ **module อื่น** เช่นการส่งอีเมล, เขียน log audit, หรือแจ้งผ่าน Kafka — เราจะ **แปลง Domain Event เป็น Integration Event** แล้วค่อยส่งออกแบบ **async**
+
+ตัวอย่าง
+
+```go
+type CustomerCreatedDomainEventHandler struct {
+	eventBus EventBus
+}
+
+func (h *CustomerCreatedDomainEventHandler) Handle(ctx context.Context, evt CustomerCreated) error {
+	// แปลงเป็น Integration Event
+	return h.eventBus.Publish(ctx, CustomerCreatedIntegrationEvent{
+		CustomerID: evt.ID,
+		Email:      evt.Email,
+	})
+}
+```
+
+## สรุปข้อดีของการใช้ Event-Based Approach
+
+- แยก business logic ออกจาก infrastructure concern
+- ลด coupling ระหว่าง module และ service ต่างๆ
+- เปิดทางสู่ scalability และ async processing
+- ง่ายต่อการทดสอบ และรองรับ use-case ใหม่ๆ โดยไม่แก้ core logic
+
+## สุดท้าย
+
+การเปลี่ยนจากแนวทาง imperative ที่ทำทุกอย่างตรงๆ ไปสู่ event-driven ไม่ได้หมายความว่าคุณต้องเปลี่ยนทั้งหมดในคราวเดียว — แต่การเริ่ม "แยก concern" ให้ชัดเจนมากขึ้น จะช่วยให้ระบบของคุณ flexible, maintainable และรองรับการเติบโตได้ดียิ่งขึ้น

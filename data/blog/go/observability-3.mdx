@@ -1,0 +1,735 @@
+---
+title: 'Observability Series ตอนที่ 3 — Tracing เชื่อม Logger ด้วย OpenTelemetry + Tempo'
+date: '2025-07-09'
+lastmod: '2025-07-16'
+tags: ['go', 'observability', 'trace', 'tempo', 'grafana']
+draft: false
+summary: 'ตอนนี้เราจะเริ่ม เก็บ Trace ให้เห็นใน Grafana โดยใช้ Tempo'
+---
+
+> ตอนนี้เราจะเริ่ม **เก็บ Trace** ให้เห็นใน **Grafana** โดยใช้ **Tempo**
+
+---
+
+## **สิ่งที่จะได้เรียนรู้ในตอนนี้**
+
+- เพิ่ม **Distributed Tracing** ด้วย **OpenTelemetry (OTel)**
+- เก็บ Trace เข้า **Tempo**
+- ผูก Trace กับ Log เดียวกัน (ใช้ `TraceID` เป็น Field ใน Log)
+- Logger ตัวเดียว (Zap) + Tracer ตัวเดียว ใช้ผ่าน **Context**
+- เชื่อม Trace และ Log ใน Grafana → Click จาก Trace ไป Log ได้
+
+---
+
+## โครงสร้างเดิม + Tracing
+
+ใช้โครงสร้างเดียวกับตอนที่ 2
+
+```
+[Fiber Middleware] -> [Fiber Handler] -> [Service] -> [Repo]
+```
+
+เพิ่ม:
+
+- **Middleware** สร้าง `Tracer` ใส่ใน Context
+- ใช้ `otel.Tracer` เปิด Span ทุก Layer
+- Logger ใส่ `trace_id` เพื่อเชื่อมโยง log กับ trace
+
+---
+
+## โครงสร้างโปรเจ็กต์
+
+โค้ดตั้งต้น: https://github.com/somprasongd/observability-demo-go/tree/feat/log
+
+```
+project-root/
+│
+├── cmd/
+│   └── main.go               # จุดเริ่มโปรแกรม, bootstrap Fiber, DI, middleware
+│
+├── internal/
+│   ├── handler/
+│   │   └── user_handler.go   # HTTP Handlers (Fiber routes)
+│   │
+│   ├── service/
+│   │   └── user_service.go   # Business Logic Layer
+│   │
+│   └── repository/
+│       └── user_repo.go      # Data Access Layer
+│
+├── pkg/
+│   ├── ctxkey/
+│   │   └── ctxkey.go         # Shared Lib: เก็บ context key
+│   │
+│   ├── logger/
+│   │   └── logger.go         # Shared Lib: Logger setup (Zap)
+│   │
+│   ├── middleware/           # Shared Lib: Middleware
+│   │    └── observability_middleware.go
+│   │
+│   └── observability/
+│       └── observability.go  # Shared Lib: Trace
+│
+├── go.mod
+└── go.sum
+```
+
+---
+
+## ขั้นตอน
+
+### 1. ติดตั้ง Package Tracing
+
+```bash
+go get go.opentelemetry.io/otel
+go get go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc
+go get go.opentelemetry.io/otel/sdk/trace
+go get go.opentelemetry.io/otel/trace
+```
+
+---
+
+### 2. สร้าง Tracer Provider (OTLP gRPC)
+
+`/pkg/observability/observability.go`
+
+```go
+package observability
+
+import (
+	"context"
+	"log"
+	"time"
+
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+
+	"go.opentelemetry.io/otel/sdk/resource"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	semconv "go.opentelemetry.io/otel/semconv/v1.21.0"
+)
+
+type OTel struct {
+	TracerProvider *sdktrace.TracerProvider
+}
+
+func (c *OTel) Shutdown(ctx context.Context) error{
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	if err := c.TracerProvider.Shutdown(ctx); err != nil {
+		return fmt.Errorf("failed to shutdown tracer: %w", err)
+	}
+
+	return nil
+}
+
+func NewOTel(ctx context.Context, collectorAddr, serviceName string) (*OTel, error) {
+	// ----- Resource -----
+	res, err := resource.New(ctx,
+		resource.WithAttributes(
+			semconv.ServiceName(serviceName),
+		),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	// ----- Tracer -----
+	traceExp, err := otlptracegrpc.New(ctx,
+		otlptracegrpc.WithEndpoint(collectorAddr),
+		otlptracegrpc.WithInsecure(),
+	)
+	if err != nil {
+		return nil, err
+	}
+
+	tp := sdktrace.NewTracerProvider(
+		sdktrace.WithBatcher(traceExp),
+		sdktrace.WithResource(res),
+	)
+	otel.SetTracerProvider(tp)
+
+	return &OTel{
+		TracerProvider: tp,
+	}, nil
+}
+
+```
+
+---
+
+### 3. ปรับ Middleware
+
+ให้รับ `trace` เข้ามาเพื่อสร้าง `span` ใหม่ของแต่ละ request
+
+> แก้ไขไฟล์ `/internal/middleware/obervability_middleware.go`
+
+```go
+package middleware
+
+import (
+	"context"
+	"demo/pkg/ctxkey"
+	"fmt"
+	"runtime/debug"
+	"strings"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+)
+
+func NewObservabilityMiddleware(
+	baseLogger *zap.Logger,
+	tracer trace.Tracer,
+) fiber.Handler {
+
+	// Skip Paths ที่ไม่ต้องการ trace
+	skipPaths := map[string]bool{
+		"/health": true,
+	}
+	// กรณีมีการ serve SPA
+	staticPrefixes := []string{"/static", "/assets", "/public", "/favicon", "/robots.txt"}
+
+	return func(c *fiber.Ctx) error {
+		start := time.Now()
+		method := c.Method()
+		path := c.Path()
+
+		// ตรวจสอบ path ที่เรียกมา
+		skip := skipPaths[path]
+		for _, prefix := range staticPrefixes {
+			if strings.HasPrefix(path, prefix) {
+				skip = true
+				break
+			}
+		}
+
+		requestID := c.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.New().String()
+		}
+
+		// Bind Request ID ลง Response Header
+		c.Set("X-Request-ID", requestID)
+
+		var (
+			ctx     context.Context
+			span    trace.Span
+			traceID string
+			spanID  string
+		)
+
+		if skip {
+			ctx = c.Context()
+		} else {
+			ctx, span = tracer.Start(c.Context(), "HTTP "+c.Method()+" "+path,
+				trace.WithAttributes(attribute.String("http.request_id", requestID)),
+				trace.WithAttributes(attribute.String("http.request.method", method)),
+				trace.WithAttributes(attribute.String("url.path", path)),
+			)
+			defer span.End()
+			traceID = span.SpanContext().TraceID().String()
+			spanID = span.SpanContext().SpanID().String()
+		}
+
+		// สร้าง child logger
+		reqLogger := baseLogger.With(
+			zap.String("request_id", requestID),
+			zap.String("http.request.method", method),
+			zap.String("url.path", path),
+		)
+
+		// สร้าง Context ใหม่ที่มี logger
+		ctx = context.WithValue(ctx, ctxkey.Logger{}, reqLogger)
+		// แทน Context เดิม
+		c.SetUserContext(ctx)
+
+		err := c.Next()
+
+		duration := time.Since(start).Milliseconds()
+		status := c.Response().StatusCode()
+
+		// log unhandle error
+		if err != nil {
+			reqLogger.Error("an error occurred",
+				zap.Any("error", err),
+				zap.ByteString("stack", debug.Stack()),
+				zap.String("trace_id", traceID), // เพิ่ม trace_id เพื่อเชื่อมโยง log กับ trace
+				zap.String("span_id", spanID),   // เพิ่ม span_id เพื่อเชื่อมโยง log กับ trace
+			)
+		}
+
+		msg := fmt.Sprintf("%d - %s %s", status, method, path)
+		reqLogger.Info(msg,
+			zap.Int("http.response.status_code", status),
+			zap.Int64("duration_ms", duration),
+			zap.String("trace_id", traceID), // เพิ่ม trace_id เพื่อเชื่อมโยง log กับ trace
+			zap.String("span_id", spanID),   // เพิ่ม span_id เพื่อเชื่อมโยง log กับ trace
+		)
+
+		span.SetAttributes(
+			attribute.Int("http.response.status_code", status),
+		)
+
+		if status >= 400 {
+			span.SetStatus(codes.Error, "")
+		} else {
+			span.SetStatus(codes.Ok, "")
+		}
+
+		return err
+	}
+}
+```
+
+ปรับ logger ให้ใส่ `trace_id` กับ `span_id`
+
+> แก้ไขไฟล์ `/pkg/logger/logger.go`
+
+```go
+func FromContext(ctx context.Context) *zap.Logger {
+	log, ok := ctx.Value(ctxkey.Logger{}).(*zap.Logger)
+	if !ok {
+		log = baseLogger
+	}
+
+	// ดึง trace_id + span_id จาก OTel context
+	span := trace.SpanContextFromContext(ctx)
+
+	if span.IsValid() {
+		return log.With(
+			zap.String("trace_id", span.TraceID().String()), // เพิ่ม trace_id เพื่อเชื่อมโยง log กับ trace
+			zap.String("span_id", span.SpanID().String()),   // เพิ่ม span_id เพื่อเชื่อมโยง log กับ trace
+		)
+	}
+
+	return log
+}
+```
+
+---
+
+### 4. แก้ไข Main
+
+`/cmd/main.go`
+
+```go
+package main
+
+import (
+	"context"
+	"os"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+
+	"demo/internal/handler"
+	"demo/internal/repository"
+	"demo/internal/service"
+	"demo/pkg/logger"
+	"demo/pkg/middleware"
+	"demo/pkg/observability"
+)
+
+func main() {
+	// Init Logger
+	logger.Init()
+
+	// Init Observability via Opentelmetry
+	otel, err := observability.NewOTel(
+		context.Background(),
+		os.Getenv("OTEL_EXPORTER_OTLP_ENDPOINT"),
+		"demo-app")
+	if err != nil {
+		logger.Default().Fatal(err.Error())
+	}
+	defer otel.Shutdown(context.Background())
+
+	// Init Fiber
+	app := fiber.New()
+
+	// Middlewares
+	app.Use(middleware.NewObservabilityMiddleware(
+		logger.Default(),
+		otel.TracerProvider.Tracer("demo-app"), // เพิ่มส่ง tracer
+	))
+	app.Use(cors.New())
+	app.Use(recover.New())
+
+	// Init DI
+	repo := repository.NewUserRepository()
+	svc := service.NewUserService(repo)
+	h := handler.NewUserHandler(svc)
+
+	// Routes
+	app.Get("/users/:id", h.GetUser)
+
+	// Start
+	app.Listen(":8080")
+}
+```
+
+---
+
+### 5. Handler Layer → เปิด Span ต่อ
+
+`/internal/handler/user_handler.go`
+
+```go
+package handler
+
+import (
+	"demo/internal/service"
+	"demo/pkg/logger"
+
+	"github.com/gofiber/fiber/v2"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+)
+
+type UserHandler struct {
+	svc *service.UserService
+}
+
+func NewUserHandler(svc *service.UserService) *UserHandler {
+	return &UserHandler{svc: svc}
+}
+
+func (h *UserHandler) GetUser(c *fiber.Ctx) error {
+	ctx := c.UserContext()
+	logger := logger.FromContext(ctx)
+
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("handler")
+	ctx, span := tracer.Start(ctx, "Handler:GetUser")
+	defer span.End()
+
+	logger.Info("Handler: GetUser called")
+
+	id := c.Params("id")
+
+	user, err := h.svc.GetUser(ctx, id)
+	if err != nil {
+		logger.Error("Handler: Failed to get user", zap.Error(err))
+		return c.Status(500).SendString("Internal Server Error")
+	}
+
+	return c.JSON(user)
+}
+```
+
+---
+
+### 6. Service Layer → Span + Logger จาก Context
+
+`/internal/service/user_service.go`
+
+```go
+package service
+
+import (
+	"context"
+	"demo/internal/repository"
+	"demo/pkg/logger"
+
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+)
+
+type UserService struct {
+	repo *repository.UserRepository
+}
+
+func NewUserService(repo *repository.UserRepository) *UserService {
+	return &UserService{repo: repo}
+}
+
+func (s *UserService) GetUser(ctx context.Context, id string) (map[string]string, error) {
+	logger := logger.FromContext(ctx)
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("service")
+	ctx, span := tracer.Start(ctx, "Service:GetUser")
+	defer span.End()
+
+	logger.Info("Service: GetUser called", zap.String("id", id))
+
+	return s.repo.FindUser(ctx, id)
+}
+```
+
+---
+
+### 7. Repository Layer → Span + Logger จาก Context
+
+`/internal/repository/user_repo.go`
+
+```go
+package repository
+
+import (
+	"context"
+	"demo/pkg/logger"
+
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+)
+
+type UserRepository struct{}
+
+func NewUserRepository() *UserRepository {
+	return &UserRepository{}
+}
+
+func (r *UserRepository) FindUser(ctx context.Context, id string) (map[string]string, error) {
+	logger := logger.FromContext(ctx)
+	tracer := trace.SpanFromContext(ctx).TracerProvider().Tracer("repository")
+	ctx, span := tracer.Start(ctx, "Repository:FindUser")
+	defer span.End()
+
+	logger.Info("Repository: FindUser called", zap.String("id", id))
+
+	// Mock DB
+	user := map[string]string{
+		"id":   id,
+		"name": "John Doe",
+	}
+	return user, nil
+}
+```
+
+---
+
+### 8. ส่ง Trace ไป Tempo
+
+- สร้าง config ของ tempo
+  `tempo.yaml` \*\*\*\*
+
+  ```yaml
+  auth_enabled: false
+
+  stream_over_http_enabled: true
+  server:
+    http_listen_port: 3200
+    log_level: info
+
+  distributor:
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 'tempo:4317'
+
+  ingester:
+    trace_idle_period: 10s
+    max_block_duration: 5m
+
+  compactor:
+    compaction:
+      block_retention: 1h
+
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /tmp/tempo/blocks
+      wal:
+        path: /tmp/tempo/wal
+  ```
+
+- สร้าง config ของ exporters
+  `otel-collector-config.yaml`
+
+  ```yaml
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+
+  exporters:
+    otlp/tempo:
+      endpoint: tempo:4317
+      tls:
+        insecure: true
+
+  processors:
+    batch:
+
+  service:
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [batch]
+        exporters: [otlp/tempo]
+  ```
+
+- แก้ให้ loki เพิ่ม label ชื่อ `trace_id`
+  `promtail-config.yml`
+
+  ```yaml
+  server:
+    http_listen_port: 9080
+    grpc_listen_port: 0
+
+  positions:
+    filename: /tmp/positions.yaml
+
+  clients:
+    - url: http://loki:3100/loki/api/v1/push
+
+  scrape_configs:
+    - job_name: docker-logs
+      docker_sd_configs:
+        - host: unix:///var/run/docker.sock
+          refresh_interval: 5s
+          filters:
+            - name: label
+              values: ['logging=promtail']
+
+      relabel_configs:
+        - source_labels: ['__meta_docker_container_name']
+          regex: '/(.*)'
+          target_label: 'container'
+        - source_labels: ['__meta_docker_container_log_stream']
+          target_label: 'logstream'
+        - source_labels: ['__meta_docker_container_label_logging_jobname']
+          target_label: 'job'
+
+      pipeline_stages:
+        - docker: {}
+        - json:
+            expressions:
+              app_name:
+              level:
+              msg:
+              request_id:
+              trace_id:
+        - labels:
+            app_name:
+            level:
+            request_id:
+            trace_id:
+  ```
+
+- เพิ่ม service `opentelemetry-collector` กับ `tempo`
+  `docker-compose.yml`
+
+  ```yaml
+  services:
+    app:
+      build: .
+      container_name: backend-app
+      ports:
+        - '8080:8080'
+      environment:
+        - OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+      depends_on:
+        - otel-collector
+      logging:
+        driver: 'json-file'
+        options:
+          max-size: '10m'
+          max-file: '5'
+      # เพิ่ม label สำหรับ filtering logs
+      labels:
+        logging: 'promtail'
+        logging_jobname: 'containerlogs'
+
+    loki:
+      image: grafana/loki:latest
+      container_name: loki
+      command: -config.file=/etc/loki/local-config.yaml
+      volumes:
+        - loki_data:/loki
+      # ports:
+      #   - "3100:3100"
+
+    promtail:
+      image: grafana/promtail:latest
+      container_name: promtail
+      volumes:
+        - ./promtail-config.yml:/etc/promtail/promtail-config.yml
+        - /var/lib/docker/containers:/var/lib/docker/containers:ro
+        - /var/run/docker.sock:/var/run/docker.sock:ro
+      command: -config.file=/etc/promtail/promtail-config.yml
+      depends_on:
+        - loki
+
+    otel-collector:
+      image: otel/opentelemetry-collector:latest
+      container_name: otel-collector
+      volumes:
+        - ./otel-collector-config.yaml:/etc/otelcol/config.yaml
+      command: ['--config=/etc/otelcol/config.yaml']
+      ports:
+        - '4317:4317' # gRPC
+        - '4318:4318' # HTTP
+        - '9464:9464'
+      depends_on:
+        - tempo
+
+    tempo:
+      image: grafana/tempo:latest
+      container_name: tempo
+      volumes:
+        - ./tempo.yaml:/etc/tempo.yaml
+      command: ['-config.file=/etc/tempo.yaml']
+      # ports:
+      #   - "3200" # tempo
+      #   - "4317" # otlp grpc
+
+    grafana:
+      image: grafana/grafana:latest
+      container_name: grafana
+      ports:
+        - '3000:3000'
+      environment:
+        - GF_SECURITY_ADMIN_USER=admin
+        - GF_SECURITY_ADMIN_PASSWORD=admin
+      volumes:
+        - grafana-data:/var/lib/grafana
+      depends_on:
+        - loki
+        - tempo
+
+  volumes:
+    loki_data:
+    grafana-data:
+  ```
+
+---
+
+### 8. ดู Trace ใน Grafana
+
+1. รัน App ด้วยคำสั่ง: `docker compose up -d --build`
+2. ส่ง Request: `curl http://localhost:8080/users/1`
+3. เปิด Grafana: http://localhost:3000 (User: admin, Password: admin)
+4. Data Source → Add data source → **Tempo** → URL: http://tempo:3200 → Trace to logs: เลือก Loki และเปิด filter by trace id → Save & test
+5. Explore → Trace → เลือก Query Type เป็น Search → คุณจะเห็น Trace ID และสามารถกดลิงค์ไปยัง log ผ่าน trace id ได้
+
+---
+
+## จุดเด่นแนวทางนี้
+
+- `TraceID` ใส่ใน Log ทุกบรรทัด → เชื่อม Log + Trace ได้จริง
+- ใช้ `otel` แบบมาตรฐาน → ต่อเข้ากับ Tempo Collector หรือ Jaeger ได้หมด
+
+---
+
+## สรุป
+
+- คุณมี Distributed Tracing ครบ
+- ทุก Layer มี Trace Span ของตัวเอง
+- ทุก Log ผูกกับ TraceID → กดไปกลับ Log ↔ Trace ใน Grafana ได้ทันที
+
+---
+
+## ตอนถัดไป
+
+- ตอนที่ 4 — [เก็บ Metrics ด้วย OpenTelemetry + OTLP Metric (gRPC)](/blog/go/observability-4)
+  ทำ Metrics ต่อให้ครบ 3 เสาหลัก Logs + Traces + Metrics!

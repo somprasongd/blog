@@ -1,0 +1,194 @@
+---
+title: 'การใช้งาน Enum ใน Go'
+date: '2023-01-27'
+lastmod: '2023-01-27'
+tags: ['go']
+draft: false
+summary: 'การใช้งาน Enum และการสร้าง Enum Type ใน Go'
+---
+
+# การใช้งาน Enum ใน Go
+
+Enum คือ การสร้างกลุ่มของข้อมูลมูลขึ้นมาเป็นค่าคงที่ที่มีความหมาย และทำให้เราอ่านโค้ดได้เข้าใจง่ายขึ้น โดยการประกาศ enum ในภาษา Go จะใช้ `const` ของ `int` หรือ `string` เพื่อสร้างขึ้นมา เช่น
+
+```go
+// string mapping
+const (
+	Sunday string = "sunday "
+	Monday        = "monday"
+	Tuesday       = "tuesday"
+	Wednesday     = "wednesday"
+  Thursday      = "thursday"
+  Friday        = "friday"
+  Saturday      = "saturday"
+)
+
+// int mapping
+const (
+	Sunday int    = 0
+	Monday        = 1
+	Tuesday       = 2
+	Wednesday     = 3
+  Thursday      = 4
+  Friday        = 5
+  Saturday      = 6
+)
+```
+
+แต่เพื่อให้โค้ดของเราอ่านง่ายขึ้น แนะนำให้สร้าง enum ร่วมกับ `iota` แทน โดยจะมีค่าเริ่มต้นที่ 0 ตัวถัดๆ ไปจะ +1 ไปเรื่อยๆ
+
+```go
+const (
+	Sunday = iota
+	Monday
+	Tuesday
+	Wednesday
+	Thursday
+	Friday
+	Saturday
+)
+```
+
+แต่การเอา enum ไปใช้งานแบบนี้อาจทำให้เกิดข้อผิดพลาดได้ เช่น การเอาไปเปรียบเทียบค่าว่าเท่ากันหรือไม่
+
+```go
+const (
+	Sunday = iota
+	Monday
+	Tuesday
+	Wednesday
+	Thursday
+	Friday
+	Saturday
+)
+
+const (
+	Morning = iota
+	Afternoon
+	Night
+)
+
+func main() {
+	// สิ่งที่ต้องการ มันต้องไม่เป็น true
+	fmt.Println(Sunday == Morning)  // true
+}
+```
+
+เราสามารถแก้ปัญหานี้ได้โดยการสร้าง type ใหม่ขึ้นมา เพื่อใช้เป็น enum type
+
+```go
+type Day int64
+
+const (
+	Sunday Day = iota
+	Monday
+	Tuesday
+	Wednesday
+	Thursday
+	Friday
+	Saturday
+)
+
+type DayTime int64
+
+const (
+	Morning DayTime = iota
+	Afternoon
+	Night
+)
+
+func main() {
+	// จะทำให้เราไม่สามารถเอามาเปรียบเทียบกันได้แล้ว
+	fmt.Println(Sunday == Morning)
+  // invalid operation: Sunday == Morning (mismatched types Day and DayTime)
+}
+```
+
+อีกปัญหาหนึ่งก็คือ เมื่อเราสั่ง print ค่าของ enum ออกมามันจะเป็นตัวเลข ทำให้อ่านแล้วไม่เข้าใจความหมาย เช่น
+
+```go
+type Day int64
+
+const (
+	Sunday Day = iota
+	Monday
+	Tuesday
+	Wednesday
+	Thursday
+	Friday
+	Saturday
+)
+
+func printDay(d Day) {
+	fmt.Println(d)
+}
+
+func main() {
+	printDay(Sunday) // 0
+}
+```
+
+เพื่อแก้ปัญหานี้ ให้เพิ่ม `receiver function String()` ให้กับ type ที่สร้างขึ้นมาใหม่ ดังนี้
+
+```go
+func (d Day) String() string {
+	switch d {
+	case Sunday:
+		return "sunday "
+	case Monday:
+		return "monday"
+	case Tuesday:
+		return "tuesday"
+	case Wednesday:
+		return "wednesday"
+	case Thursday:
+		return "thursday"
+	case Friday:
+		return "friday"
+	case Saturday:
+		return "saturday"
+	default:
+		return "unknown"
+	}
+}
+```
+
+เมื่อลองรันโปรแกรมใหม่จะได้คำว่า `sunday` ออกมาแทน
+
+ปัญหาถัดมา เนื่อง type Day เป็น int64 ทำให้เราสามารถสร้างตัวแปรของ Day และกำหนดค่าที่มากกว่า 6 ได้ ซึ่งเมื่อสั่ง printDay จะได้ค่าเป็น `unknown`
+
+```go
+func main() {
+	d := Day(10)
+
+	printDay(d) // unknown
+}
+```
+
+ดังนั้น เราจึงควรมีการตรวจสอบด้วยว่าค่าที่กำหนดมานั้นถูกต้องหรือไม่ ดังนี้
+
+```go
+func (d Day) isValid() bool {
+	switch d {
+	case Sunday, Monday, Tuesday, Wednesday, Thursday, Friday, Saturday:
+		return true
+	default:
+		return false
+	}
+}
+
+func main() {
+	d := Day(10)
+
+	if ok := d.isValid(); !ok {
+		fmt.Println("Invalid value")
+		return
+	}
+
+	printDay(d)
+}
+
+// Invalid value
+```
+
+สามารถดูโค้ดทั้งหมดได้[ที่นี่](https://go.dev/play/p/gEspNPdZ5Z7)

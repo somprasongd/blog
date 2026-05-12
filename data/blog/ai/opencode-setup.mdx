@@ -1,0 +1,508 @@
+---
+title: 'เริ่มต้นใช้งาน opencode กับ Model ฟรีผ่าน Zen และ OpenRouter'
+date: '2026-05-12'
+lastmod: '2026-05-12'
+tags: ['opencode', 'AI Coding Agent', 'Zen', 'OpenRouter', 'Free Models', 'CLI']
+draft: false
+summary: 'คู่มือภาษาไทยสำหรับติดตั้ง opencode ตั้งค่า Zen/OpenRouter และเลือกโมเดลฟรีหรือโมเดลเริ่มต้นสำหรับงาน coding agent'
+---
+
+# เริ่มต้นใช้งาน opencode กับ Model ฟรีผ่าน Zen และ OpenRouter
+
+> **หมายเหตุเรื่อง “ฟรี” ก่อนเริ่ม:** OpenRouter มีรูปแบบโมเดลฟรีที่ระบุด้วย suffix `:free` เช่น `minimax/minimax-m2.5:free` และมี rate limit ของ free tier ส่วน Zen จากเอกสารทางการของ opencode ระบุว่าเป็น AI gateway ที่มีการคิดเงินต่อ request และเติมเครดิตได้ ดังนั้นให้ตรวจสอบรายการโมเดล ราคา เครดิตทดลอง หรือโมเดลที่แสดงเป็น free ในหน้า Zen ณ วันที่ใช้งานจริงก่อนเริ่มใช้งานจริงเสมอ
+
+opencode คือ AI coding agent แบบ open source ที่ใช้งานจาก Terminal ได้โดยตรง เหมาะสำหรับงานอ่านโค้ด อธิบายโปรเจกต์ แก้บั๊ก refactor เขียนฟีเจอร์ และช่วยทำงานซ้ำ ๆ ใน repository โดยไม่ต้องย้ายไปมาระหว่าง editor กับเว็บแชต AI
+
+บทความนี้จะพาเริ่มตั้งแต่ติดตั้ง opencode, เชื่อมต่อ provider, เลือกโมเดลผ่าน **OpenCode Zen** และ **OpenRouter**, รวมถึงวิธีเลือกโมเดลฟรีหรือโมเดลราคาประหยัดสำหรับใช้งานจริง
+
+---
+
+## ภาพรวมการทำงาน
+
+```
+Developer
+   │
+   ▼
+Terminal / IDE
+   │
+   ▼
+opencode
+   │
+   ├── OpenCode Zen      → curated coding models ที่ทีม opencode ทดสอบแล้ว
+   │
+   └── OpenRouter        → gateway รวมโมเดลจำนวนมาก รวมถึงโมเดล :free
+   │
+   ▼
+AI Coding Agent ทำงานกับไฟล์ โค้ด และ command line
+```
+
+---
+
+## 1. opencode คืออะไร
+
+opencode เป็น AI coding agent แบบ open source ที่มี interface หลักเป็น Terminal-based UI และยังมี desktop app / IDE extension ให้ใช้งานได้ด้วย จุดเด่นคือสามารถเชื่อมกับ LLM provider ได้หลายเจ้า และให้โมเดลช่วยทำงานใน context ของโปรเจกต์จริง เช่น อ่านไฟล์ แก้ไฟล์ รันคำสั่ง หรือสรุปโครงสร้าง repository
+
+จากเอกสารทางการ opencode รองรับ provider มากกว่า 75 รายผ่าน AI SDK และ Models.dev รวมถึงรองรับ local models ด้วย
+
+เหมาะกับงาน เช่น
+
+- อธิบายโค้ดในไฟล์หรือทั้ง repository
+- สร้างแผนก่อนแก้ฟีเจอร์
+- refactor โค้ด
+- เขียน test
+- debug error จาก terminal output
+- สร้างเอกสาร เช่น `README.md`, `AGENTS.md`, changelog หรือ migration note
+
+---
+
+## 2. สิ่งที่ต้องเตรียม
+
+ก่อนติดตั้ง แนะนำให้มีสิ่งเหล่านี้
+
+1. Terminal ที่รองรับการแสดงผลสมัยใหม่ เช่น WezTerm, Alacritty, Ghostty หรือ Kitty
+2. Node.js, npm, pnpm, Bun, Homebrew หรือ package manager ที่ถนัด
+3. บัญชี OpenCode Zen หรือ OpenRouter
+4. API key ของ provider ที่ต้องการใช้
+5. โปรเจกต์ Git ที่ต้องการให้ opencode ช่วยทำงาน
+
+---
+
+## 3. ติดตั้ง opencode
+
+วิธีที่ง่ายที่สุดบน macOS/Linux คือใช้ install script
+
+```bash
+curl -fsSL <https://opencode.ai/install> | bash
+```
+
+ถ้าใช้ Node.js สามารถติดตั้งผ่าน npm ได้
+
+```bash
+npm install -g opencode-ai
+```
+
+หรือใช้ Bun / pnpm / Yarn
+
+```bash
+bun install -g opencode-ai
+pnpm install -g opencode-ai
+yarn global add opencode-ai
+```
+
+บน macOS/Linux ถ้าใช้ Homebrew เอกสาร opencode แนะนำ tap ของ opencode เพื่อให้ได้ release ที่อัปเดตกว่า formula กลางของ Homebrew
+
+```bash
+brew install anomalyco/tap/opencode
+```
+
+บน Windows แนะนำใช้ WSL เพื่อ compatibility ที่ดีกว่า จากนั้นติดตั้งใน WSL ด้วยคำสั่งเดียวกับ Linux
+
+```bash
+curl -fsSL <https://opencode.ai/install> | bash
+```
+
+ตรวจสอบว่าติดตั้งสำเร็จหรือไม่
+
+```bash
+opencode --version
+```
+
+หรือเข้าไปที่ project แล้วรัน
+
+```bash
+opencode
+```
+
+---
+
+## 4. ตั้งค่า provider ด้วย `/connect`
+
+แนวคิดหลักของ opencode คือให้เราเชื่อมต่อ LLM provider ผ่านคำสั่ง `/connect` ใน TUI จากนั้นเลือก provider และใส่ API key
+
+เริ่มจากเปิด opencode ในโฟลเดอร์โปรเจกต์
+
+```bash
+cd /path/to/your/project
+opencode
+```
+
+ใน TUI ให้พิมพ์
+
+```
+/connect
+```
+
+จากนั้นเลือก provider ที่ต้องการ เช่น
+
+- OpenCode Zen
+- OpenRouter
+- Anthropic
+- OpenAI
+- Gemini
+- หรือ custom provider แบบ OpenAI-compatible
+
+เมื่อใส่ API key แล้ว opencode จะเก็บ credential ไว้ที่
+
+```
+~/.local/share/opencode/auth.json
+```
+
+> อย่า commit API key ลง Git repository และอย่าแชร์ไฟล์ auth/config ที่มี key จริง
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/opencode-setup/p1.png)</div>
+</div>
+
+---
+
+## 5. ใช้งานผ่าน OpenCode Zen
+
+OpenCode Zen คือ curated list ของโมเดลที่ทีม opencode ทดสอบและ benchmark แล้วว่าเหมาะกับ coding agent มากกว่าโมเดลทั่วไป จุดเด่นคือเริ่มง่าย ไม่ต้องไล่ลอง provider/model จำนวนมากเอง
+
+ขั้นตอนใช้งาน Zen
+
+1. เข้า OpenCode Zen
+2. สร้าง API key
+3. เปิด opencode แล้วรัน `/connect`
+4. เลือก `OpenCode Zen`
+5. วาง API key
+6. รัน `/models`
+7. เลือกโมเดลที่ต้องการ เช่นโมเดล coding ที่ opencode แนะนำในขณะนั้น
+
+ใน TUI
+
+```
+/connect
+```
+
+เลือก `OpenCode Zen` แล้วใส่ key
+
+จากนั้นดูรายการโมเดล
+
+```
+/models
+```
+
+ข้อดีของ Zen คือเหมาะกับคนที่ต้องการ “ทางลัด” ไปยังโมเดลที่ถูกทดสอบกับ opencode แล้ว ไม่ต้องเริ่มจากการเทียบโมเดลเองทั้งหมด
+
+ข้อควรระวัง:
+
+- เอกสารทางการระบุว่า Zen อยู่ในสถานะ beta
+- Zen เป็น optional ไม่จำเป็นต้องใช้ก็สามารถใช้ opencode ได้
+- เอกสารระบุว่ามีการคิดเงินต่อ request และสามารถเติมเครดิตได้
+- หากต้องการใช้แบบไม่เสียเงิน ให้ตรวจสอบในหน้า Zen ว่าบัญชีของคุณมี free model, free credit, promotional model หรือ quota ฟรีใด ๆ อยู่หรือไม่
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/opencode-setup/p2.png)</div>
+</div>
+
+---
+
+## 6. ใช้งานผ่าน OpenRouter และเลือกโมเดลฟรี
+
+OpenRouter เป็น unified API สำหรับเรียกใช้โมเดลจำนวนมากผ่าน endpoint เดียว จุดเด่นคือมีโมเดลจากหลาย provider และรองรับ OpenAI-compatible API
+
+สำหรับการใช้แบบฟรี ให้มองหา model ID ที่ลงท้ายด้วย
+
+```
+(free)
+```
+
+ตัวอย่างรูปแบบ model ID
+
+```
+MiniMax: MiniMax M2.5 (free)
+```
+
+OpenRouter ระบุว่า free variant ให้ใช้งานโมเดลได้โดยไม่มี cost แต่อาจมี rate limit หรือ availability ต่างจาก paid version
+
+ขั้นตอนเชื่อม OpenRouter กับ opencode
+
+1. เข้า OpenRouter dashboard
+2. สร้าง API key
+3. เปิด opencode แล้วรัน `/connect`
+4. เลือก `OpenRouter`
+5. วาง API key
+6. รัน `/models`
+7. เลือกโมเดลที่ต้องการ โดยถ้าจะใช้ฟรีให้เลือกโมเดลที่ลงท้าย `(free)`
+
+ใน opencode
+
+```
+/connect
+```
+
+เลือก `OpenRouter` แล้วใส่ API key
+
+จากนั้น
+
+```
+/models
+```
+
+เลือกโมเดลฟรีหรือโมเดลราคาประหยัดที่ต้องการใช้
+
+<div className="flex justify-center">
+  <div>![](/static/images/ai/opencode-setup/p3.png)</div>
+</div>
+
+---
+
+## 7. ตัวอย่าง config สำหรับ OpenRouter
+
+โดยปกติ OpenRouter เป็น provider ที่ opencode รองรับอยู่แล้ว หลังเชื่อมผ่าน `/connect` สามารถเลือกโมเดลผ่าน `/models` ได้
+
+ถ้าต้องการเพิ่มโมเดลเองใน `opencode.json` สามารถเพิ่มได้ที่ project root
+
+```json
+{
+  "$schema": "<https://opencode.ai/config.json>",
+  "provider": {
+    "openrouter": {
+      "models": {
+        "minimax/minimax-m2.5:free": {},
+        "qwen/qwen3-coder:free": {}
+      }
+    }
+  },
+  "model": "openrouter/minimax/minimax-m2.5:free"
+}
+```
+
+> หมายเหตุ: รายชื่อโมเดลฟรีเปลี่ยนได้ตลอด ควรตรวจสอบชื่อ model ID ล่าสุดจากหน้า Models ของ OpenRouter ก่อนนำไปใช้จริง
+
+ถ้าต้องการตั้งค่า provider แบบ OpenAI-compatible ด้วยตนเอง เช่นใช้ endpoint อื่นที่ไม่ได้อยู่ใน `/connect` สามารถใช้ pattern ประมาณนี้
+
+```json
+{
+  "$schema": "<https://opencode.ai/config.json>",
+  "provider": {
+    "my-openai-compatible-provider": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "My Provider",
+      "options": {
+        "baseURL": "<https://api.example.com/v1>",
+        "apiKey": "{env:MY_PROVIDER_API_KEY}"
+      },
+      "models": {
+        "my-model-name": {
+          "name": "My Model"
+        }
+      }
+    }
+  },
+  "model": "my-openai-compatible-provider/my-model-name"
+}
+```
+
+ตำแหน่ง config ที่ใช้บ่อยมี 2 แบบ
+
+- Global config: `~/.config/opencode/opencode.json`
+- Project config: `opencode.json` ใน root ของโปรเจกต์
+
+สำหรับบทความนี้ แนะนำให้เริ่มจาก project config ก่อน เพราะแก้เฉพาะโปรเจกต์นั้น ๆ และเห็นผลชัดเจนกว่า
+
+---
+
+## 8. วิธีทดสอบว่าใช้งานได้จริง
+
+หลังติดตั้งและเชื่อม provider แล้ว ให้เข้าไปที่โปรเจกต์ที่ต้องการ
+
+```bash
+cd /path/to/project
+opencode
+```
+
+ลองถามคำถามง่าย ๆ เช่น
+
+```
+อธิบายโครงสร้างโปรเจกต์นี้แบบสั้น ๆ
+```
+
+หรือ
+
+```
+หา entry point หลักของโปรเจกต์นี้ให้หน่อย
+```
+
+ถ้าต้องการให้ opencode สร้างกติกาการทำงานของโปรเจกต์ ให้ใช้
+
+```
+/init
+```
+
+โดย opencode จะช่วยสร้างไฟล์ `AGENTS.md` เพื่อเก็บ project instructions เช่น coding style, test command, build command และข้อควรระวังของ repo
+
+---
+
+## 9. แนะนำ workflow สำหรับมือใหม่
+
+### รอบแรก: ให้ AI อ่านก่อน อย่าเพิ่งแก้
+
+เริ่มจากถามให้ opencode ทำความเข้าใจ repository
+
+```
+สรุป architecture ของโปรเจกต์นี้ โดยแบ่งเป็น frontend, backend, database, integration
+```
+
+หรือ
+
+```
+ไฟล์ไหนสำคัญที่สุดสำหรับ flow login
+```
+
+### รอบสอง: ให้ทำแผนก่อนแก้
+
+ก่อนสั่งแก้โค้ด ให้ขอ plan ก่อน
+
+```
+ช่วยวางแผนเพิ่ม feature reset password แต่อย่าเพิ่งแก้ไฟล์
+```
+
+### รอบสาม: ค่อยให้แก้ทีละส่วน
+
+```
+แก้เฉพาะ backend ก่อน แล้วอธิบายไฟล์ที่เปลี่ยน
+```
+
+### รอบสี่: ให้รัน test / lint
+
+```
+รัน test ที่เกี่ยวข้อง แล้วแก้ error ถ้ามี
+```
+
+### รอบห้า: ให้สรุป diff
+
+```
+สรุปสิ่งที่แก้ในรอบนี้เป็น bullet สำหรับ commit message
+```
+
+---
+
+## 10. เลือก Zen หรือ OpenRouter ดี
+
+| กรณีใช้งาน                                                      | แนะนำ                                                                      |
+| --------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| อยากเริ่มเร็วที่สุด และใช้โมเดลที่ถูกคัดแล้วสำหรับ coding agent | Zen                                                                        |
+| อยากลองโมเดลฟรีจำนวนมาก                                         | OpenRouter                                                                 |
+| อยากควบคุม cost และเลือก `:free` model                          | OpenRouter                                                                 |
+| อยากลดเวลาลองผิดลองถูกเรื่อง model/provider                     | Zen                                                                        |
+| อยากใช้โมเดลหลายค่ายผ่าน API key เดียว                          | OpenRouter                                                                 |
+| ใช้งานจริงกับโปรเจกต์สำคัญ                                      | เริ่มจาก Zen หรือ paid model ที่เสถียรกว่า แล้วใช้ free model สำหรับงานเบา |
+
+ข้อสรุปง่าย ๆ:
+
+- **Zen** เหมาะกับ “อยากได้โมเดลที่ opencode แนะนำสำหรับ coding agent”
+- **OpenRouter** เหมาะกับ “อยากลองหลายโมเดล โดยเฉพาะโมเดลฟรีที่ลงท้าย `:free`”
+- ถ้าเป็นงาน production หรือ repo สำคัญ ให้ระวัง rate limit, availability และคุณภาพของ free model
+
+---
+
+## 11. ข้อควรระวังด้านความปลอดภัยของข้อมูล
+
+มีความเสี่ยงว่า "โมเดลฟรีบางตัว" ผ่าน Zen และ OpenRouter อาจนำ prompt/output ไปใช้ปรับปรุงหรือเทรนโมเดลได้ ขึ้นกับ provider/model ที่ route ไป ดังนั้น
+
+- ไม่ควรใส่ source code ลับ, credential, customer data, PHI/PII หรือข้อมูลบริษัทลงไปใน free model โดยไม่ตรวจ data policy ก่อน
+- ตรวจสอบ privacy policy ของ provider และ model ที่เลือกใช้ก่อนส่งข้อมูลสำคัญ
+- ถ้าโปรเจกต์มีข้อมูลที่เป็นความลับทางธุรกิจ ควรใช้ local model หรือ paid model ที่ระบุว่าไม่เก็บ/ไม่เทรนด้วย prompt ของผู้ใช้
+
+---
+
+## 12. ข้อจำกัดของโมเดลฟรี
+
+โมเดลฟรีเหมาะกับการทดลอง เรียนรู้ และงานเบา แต่มีข้อจำกัดที่ควรเข้าใจ
+
+OpenRouter ระบุว่า free tier มี rate limit เช่น 50 requests/day และ 20 requests/minute สำหรับผู้ใช้ที่ยังไม่ได้ซื้อเครดิต และเมื่อซื้อเครดิตถึงเงื่อนไขที่กำหนด quota อาจเพิ่มขึ้น อย่างไรก็ตาม free model ยังอาจเจอ provider throttling หรือ error `429 Too Many Requests` ได้
+
+แนวทางใช้งานให้ลื่นขึ้น
+
+- ใช้ free model สำหรับงานอ่านโค้ด สรุปไฟล์ หรือช่วยคิด plan
+- ใช้โมเดลที่เสถียรกว่าสำหรับงานแก้หลายไฟล์
+- อย่าสั่งงานกว้างเกินไปในครั้งเดียว
+- ถ้าเจอ `429` ให้รอแล้วค่อย retry
+- อย่าใช้ free model เป็น dependency สำคัญของ production workflow โดยไม่มี fallback
+
+---
+
+## 13. Troubleshooting ที่พบบ่อย
+
+### `opencode: command not found`
+
+ตรวจสอบว่า package manager ติดตั้ง binary เข้า PATH หรือไม่
+
+```bash
+which opencode
+echo $PATH
+```
+
+ถ้าติดตั้งผ่าน npm แล้วไม่เจอ ให้เช็ค global npm bin
+
+```bash
+npm bin -g
+```
+
+### ใส่ API key แล้ว provider ไม่ขึ้น
+
+ลองรัน
+
+```
+/models
+```
+
+ถ้ายังไม่ขึ้น ให้ตรวจสอบว่าเลือก provider ถูกต้องหรือไม่ และ key ยังใช้งานได้อยู่หรือไม่
+
+### โมเดลฟรีใช้ไม่ได้ หรือเจอ `429`
+
+สาเหตุที่เป็นไปได้
+
+- หมด daily quota
+- เกิน requests per minute
+- provider ปลายทาง throttle
+- free model นั้น unavailable ชั่วคราว
+- model ID เปลี่ยนหรือถูกถอดออก
+
+แก้โดยเลือก free model ตัวอื่น หรือรอให้ quota reset
+
+### ไม่อยากให้ AI แก้ไฟล์โดยไม่ถาม
+
+ตั้ง permission ใน `opencode.json` ให้ถามก่อน edit หรือ bash
+
+```json
+{
+  "$schema": "<https://opencode.ai/config.json>",
+  "permission": {
+    "edit": "ask",
+    "bash": "ask"
+  }
+}
+```
+
+---
+
+## 14. สรุป
+
+opencode เป็นเครื่องมือที่เหมาะมากสำหรับคนที่ทำงานกับ codebase ผ่าน Terminal และต้องการ AI coding agent ที่เลือก provider ได้อิสระ ถ้าเริ่มต้นใหม่ แนะนำ flow นี้
+
+1. ติดตั้ง opencode
+2. เข้า project แล้วรัน `opencode`
+3. เชื่อม provider ด้วย `/connect`
+4. เริ่มจาก Zen ถ้าต้องการโมเดลที่ถูกคัดสำหรับ coding agent
+5. ใช้ OpenRouter ถ้าต้องการลองโมเดลฟรีผ่าน `:free`
+6. ใช้ `/models` เพื่อเลือกโมเดล
+7. ให้ AI อ่านและวางแผนก่อนแก้ไฟล์จริง
+8. ใช้ permission แบบ `ask` หากต้องการควบคุมความปลอดภัย
+
+เมื่อเข้าใจ flow นี้แล้ว คุณสามารถใช้ opencode เป็นผู้ช่วยประจำ repo ได้ทั้งงานอ่านโค้ด แก้บั๊ก refactor สร้าง test และเขียนเอกสาร โดยเลือกได้ว่าจะใช้โมเดลฟรี โมเดลราคาประหยัด หรือโมเดลคุณภาพสูงตามลักษณะงาน
+
+---
+
+## แหล่งอ้างอิง
+
+1. OpenCode Intro / Installation: https://opencode.ai/docs/
+2. OpenCode Providers: https://opencode.ai/docs/providers/
+3. OpenCode Zen: https://opencode.ai/docs/zen/
+4. OpenCode Config: https://opencode.ai/docs/config/
+5. OpenRouter Quickstart: https://openrouter.ai/docs/quickstart
+6. OpenRouter Authentication: https://openrouter.ai/docs/api/reference/authentication
+7. OpenRouter Free Variant: https://openrouter.ai/docs/guides/routing/model-variants/free
+8. OpenRouter Rate Limits: https://openrouter.zendesk.com/hc/en-us/articles/39501163636379-OpenRouter-Rate-Limits-What-You-Need-to-Know

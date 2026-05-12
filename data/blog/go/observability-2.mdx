@@ -1,0 +1,544 @@
+---
+title: 'Observability Series ตอนที่ 2 — ส่ง Log เข้า Grafana ด้วย Loki'
+date: '2025-07-09'
+lastmod: '2025-07-16'
+tags: ['go', 'observability', 'log', 'loki', 'grafana']
+draft: false
+summary: 'ตอนนี้เราจะเริ่ม เก็บ Log ให้เห็นใน Grafana โดยใช้ Loki'
+---
+
+> [ในตอนที่แล้ว](/blog/go/observability-1) เรารู้จัก Observability และ 3 เสาหลัก: Logs, Metrics, Traces
+>
+> ตอนนี้เราจะเริ่ม **เก็บ Log** ให้เห็นใน **Grafana** โดยใช้ **Loki**
+
+---
+
+## สิ่งที่จะได้เรียนรู้ในตอนนี้
+
+- สร้าง API ด้วย **Go + Fiber** (Layered Architecture)
+- ใช้ **Middleware** ใส่ `Request ID` และ `Logger` ลงใน `context.Context`
+- ทุก Layer (Handler, Service, Repo) ดึง `Logger` จาก `context`
+- ใช้ **Zap** เป็น Logger
+- ต่อ Log ออก **stdout** → เก็บด้วย **Promtail** → ส่งเข้า **Loki**
+- ดู Log ใน **Grafana Dashboard**
+
+---
+
+## ตัวอย่าง Architecture
+
+ในโปรเจ็กต์นี้ เราจะใช้ **Layered Architecture**
+
+```
+[Fiber Middleware] -> [Fiber Handler] -> [Service Layer] -> [Repository Layer]
+```
+
+และเราจะ **Log** ทุกชั้น ด้วย Logger เดียวกัน
+
+เพื่อเชื่อม Log ทั้งหมดเข้ากับ **Request ID** เดียว
+
+---
+
+## โครงสร้างโปรเจ็กต์
+
+โค้ดตั้งต้น: https://github.com/somprasongd/observability-demo-go
+
+```
+project-root/
+│
+├── cmd/
+│   └── main.go               # จุดเริ่มโปรแกรม, bootstrap Fiber, DI, middleware
+│
+├── internal/
+│   ├── handler/
+│   │   └── user_handler.go   # HTTP Handlers (Fiber routes)
+│   │
+│   ├── service/
+│   │   └── user_service.go   # Business Logic Layer
+│   │
+│   └── repository/
+│       └── user_repo.go      # Data Access Layer
+│
+├── pkg/
+│   ├── ctxkey/
+│   │   └── ctxkey.go         # Shared Lib: เก็บ context key
+│   │
+│   ├── logger/
+│   │   └── logger.go         # Shared Lib: Logger setup (Zap)
+│   │
+│   └── middleware/           # Shared Lib: Middleware
+│       └── observability_middleware.go
+│
+├── go.mod
+└── go.sum
+```
+
+---
+
+## ขั้นตอน
+
+### 1. สร้าง Logger (Zap)
+
+`/pkg/ctxkey/ctxkey.go`
+
+```go
+package ctxkey
+
+type Logger struct{}
+```
+
+`/pkg/logger/logger.go`
+
+```go
+package logger
+
+import (
+	"context"
+	"demo/pkg/ctxkey"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
+)
+
+var baseLogger *zap.Logger
+
+func Init() {
+	config := zap.NewProductionConfig()
+	// ตั้งค่า key ของ field ให้ตรงกับ OTel semantic convention
+	config.EncoderConfig.TimeKey = "timestamp"
+	config.EncoderConfig.LevelKey = "severity"
+	config.EncoderConfig.MessageKey = "message"
+	config.EncoderConfig.EncodeTime = zapcore.ISO8601TimeEncoder
+
+	var err error
+	l, err := config.Build()
+
+	if err != nil {
+		panic(err)
+	}
+
+	baseLogger = l.With(zap.String("service.name", "demo-app"))
+}
+
+func Default() *zap.Logger {
+	return baseLogger
+}
+
+// FromContext extracts logger from context
+func FromContext(ctx context.Context) *zap.Logger {
+	logger, ok := ctx.Value(ctxkey.Logger{}).(*zap.Logger)
+	if !ok {
+		return baseLogger
+	}
+	return logger
+}
+```
+
+---
+
+### 2. Middleware สร้าง Logger ต่อ Request
+
+`/pkg/middleware/obervability_middleware.go`
+
+```go
+package middleware
+
+import (
+	"context"
+	"demo/pkg/ctxkey"
+	"fmt"
+	"runtime/debug"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+)
+
+func NewObservabilityMiddleware(baseLogger *zap.Logger) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		start := time.Now()
+		method := c.Method()
+		path := c.Path()
+
+		requestID := c.Get("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.New().String()
+		}
+
+		// Bind Request ID ลง Response Header
+		c.Set("X-Request-ID", requestID)
+
+		// สร้าง child logger
+		reqLogger := baseLogger.With(
+			zap.String("request_id", requestID),
+			zap.String("http.request.method", method),
+			zap.String("url.path", path),
+		)
+
+		// สร้าง Context ใหม่
+		ctx := context.WithValue(c.Context(), ctxkey.Logger{}, reqLogger)
+		// แทน Context เดิม
+		c.SetUserContext(ctx)
+
+		err := c.Next()
+
+		duration := time.Since(start).Milliseconds()
+		status := c.Response().StatusCode()
+
+		// log unhandle error
+		if err != nil {
+			reqLogger.Error("an error occurred",
+				zap.Any("error", err),
+				zap.ByteString("stack", debug.Stack()),
+			)
+		}
+
+		msg := fmt.Sprintf("%d - %s %s", status, method, path)
+		reqLogger.Info(msg,
+			zap.Int("http.response.status_code", status),
+			zap.Int64("duration_ms", duration),
+		)
+
+		return err
+	}
+}
+```
+
+---
+
+### 3. Handler Layer
+
+เรียกใช้ logger จาก context
+
+`/internal/handler/user_handler.go`
+
+```go
+package handler
+
+import (
+	"demo/internal/service"
+	"demo/pkg/logger"
+
+	"github.com/gofiber/fiber/v2"
+	"go.uber.org/zap"
+)
+
+type UserHandler struct {
+	svc *service.UserService
+}
+
+func NewUserHandler(svc *service.UserService) *UserHandler {
+	return &UserHandler{svc: svc}
+}
+
+func (h *UserHandler) GetUser(c *fiber.Ctx) error {
+	ctx := c.UserContext()
+	// ดึง logger จาก context
+	logger := logger.FromContext(ctx)
+
+	logger.Info("Handler: GetUser called")
+
+	id := c.Params("id")
+
+	user, err := h.svc.GetUser(ctx, id)
+	if err != nil {
+		logger.Error("Handler: Failed to get user", zap.Error(err))
+		return c.Status(500).SendString("Internal Server Error")
+	}
+
+	return c.JSON(user)
+}
+```
+
+---
+
+### 4. Service Layer
+
+เรียกใช้ logger จาก context
+
+`/internal/service/user_service.go`
+
+```go
+package service
+
+import (
+	"context"
+	"demo/internal/repository"
+	"demo/pkg/logger"
+
+	"go.uber.org/zap"
+)
+
+type UserService struct {
+	repo *repository.UserRepository
+}
+
+func NewUserService(repo *repository.UserRepository) *UserService {
+	return &UserService{repo: repo}
+}
+
+func (s *UserService) GetUser(ctx context.Context, id string) (map[string]string, error) {
+	logger := logger.FromContext(ctx)
+	logger.Info("Service: GetUser called", zap.String("id", id))
+
+	return s.repo.FindUser(ctx, id)
+}
+```
+
+---
+
+### 5. Repository Layer
+
+`/internal/repository/user_repo.go`
+
+```go
+package repository
+
+import (
+	"context"
+	"demo/pkg/logger"
+
+	"go.uber.org/zap"
+)
+
+type UserRepository struct{}
+
+func NewUserRepository() *UserRepository {
+	return &UserRepository{}
+}
+
+func (r *UserRepository) FindUser(ctx context.Context, id string) (map[string]string, error) {
+	logger := logger.FromContext(ctx)
+	logger.Info("Repository: FindUser called", zap.String("id", id))
+
+	// Mock DB
+	user := map[string]string{
+		"id":   id,
+		"name": "John Doe",
+	}
+	return user, nil
+}
+```
+
+---
+
+### 6. Main
+
+`/cmd/main.go`
+
+```go
+package main
+
+import (
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/recover"
+
+	"demo/internal/handler"
+	"demo/internal/repository"
+	"demo/internal/service"
+	"demo/pkg/logger"
+	"demo/pkg/middleware"
+)
+
+func main() {
+	// Init Logger
+	logger.Init()
+
+	// Init Fiber
+	app := fiber.New()
+
+	// Middlewares
+	app.Use(middleware.NewObservabilityMiddleware(logger.Default()))
+	app.Use(cors.New())
+	app.Use(recover.New())
+
+	// Init DI
+	repo := repository.NewUserRepository()
+	svc := service.NewUserService(repo)
+	h := handler.NewUserHandler(svc)
+
+	// Routes
+	app.Get("/users/:id", h.GetUser)
+
+	// Start
+	app.Listen(":8080")
+}
+```
+
+ให้ ObservabilityMiddleware อยู่ก่อนเพราะ
+
+- เก็บ log ทุก request **ไม่ว่าผ่านหรือไม่ผ่าน CORS**
+- ถ้าเกิด panic คืน HTTP 500 response → แล้ว Observability ก็เก็บ status 500 ได้พอดี
+
+---
+
+### 7. ส่ง Log ไปหา Loki
+
+**วิธีที่ง่ายสุด:**
+
+1.  รัน **Grafana Loki** + **Promtail**
+2.  ตั้งค่าให้ Promtail อ่าน Log จาก `stdout`, `stderr` ของ Container
+
+    `promtail-config.yml`
+
+    ```yaml
+    # ตัวอย่าง promtail-config.yml
+    server:
+      http_listen_port: 9080
+      grpc_listen_port: 0
+
+    positions:
+      filename: /tmp/positions.yaml
+
+    clients:
+      - url: http://loki:3100/loki/api/v1/push
+
+    scrape_configs:
+      - job_name: docker-logs
+        docker_sd_configs:
+          - host: unix:///var/run/docker.sock
+            refresh_interval: 5s
+            filters:
+              - name: label
+                values: ['logging=promtail']
+
+        relabel_configs:
+          - source_labels: ['__meta_docker_container_name']
+            regex: '/(.*)'
+            target_label: 'container'
+          - source_labels: ['__meta_docker_container_log_stream']
+            target_label: 'logstream'
+          - source_labels: ['__meta_docker_container_label_logging_jobname']
+            target_label: 'job'
+
+        pipeline_stages:
+          - docker: {}
+          - json:
+              expressions:
+                service.name:
+                severity:
+                message:
+                request_id:
+          - labels:
+              severity:
+              request_id:
+    ```
+
+    `pipeline_stages` = ขั้นตอนการประมวลผล
+
+    - `docker: {}` → ดึง `log` จาก Docker log JSON
+    - `json` → Parse `log` เป็น JSON อีกชั้น และหา Field ตามที่ `expressions` กำหนด
+    - `labels` → สร้าง Loki label
+
+3.  ใช้ docker-compose หรือ k8s ตามสะดวก แต่ในบทความจะใช้ docker-compose
+
+    `Dockerfile`
+
+    ```docker
+    FROM golang:1.24 AS builder
+    WORKDIR /app
+    COPY go.mod go.sum ./
+    RUN go mod download
+    COPY . .
+    RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app ./cmd/main.go
+
+    FROM alpine:latest
+    RUN apk --no-cache add ca-certificates
+    WORKDIR /root/
+    COPY --from=builder /app/app .
+    EXPOSE 8080
+    CMD ["./app"]
+    ```
+
+    `docker-compose.yml`
+
+    ```yaml
+    services:
+      app:
+        build: .
+        container_name: backend-app
+        ports:
+          - '8080:8080'
+        logging:
+          driver: 'json-file'
+          options:
+            max-size: '10m'
+            max-file: '5'
+        # เพิ่ม label สำหรับ filtering logs
+        labels:
+          logging: 'promtail'
+          logging_jobname: 'containerlogs'
+
+      loki:
+        image: grafana/loki:latest
+        container_name: loki
+        volumes:
+          - loki_data:/loki
+        command: -config.file=/etc/loki/local-config.yaml
+        # ports:
+        #   - "3100:3100"
+
+      promtail:
+        image: grafana/promtail:latest
+        container_name: promtail
+        volumes:
+          - ./promtail-config.yml:/etc/promtail/promtail-config.yml
+          - /var/lib/docker/containers:/var/lib/docker/containers:ro
+          - /var/run/docker.sock:/var/run/docker.sock:ro
+        command: -config.file=/etc/promtail/promtail-config.yml
+        depends_on:
+          - loki
+
+      grafana:
+        image: grafana/grafana:latest
+        container_name: grafana
+        ports:
+          - '3000:3000'
+        environment:
+          - GF_SECURITY_ADMIN_USER=admin
+          - GF_SECURITY_ADMIN_PASSWORD=admin
+        volumes:
+          - grafana-data:/var/lib/grafana
+        depends_on:
+          - loki
+
+    volumes:
+      loki_data:
+      grafana-data:
+    ```
+
+          <aside>
+
+    💡
+
+    ใช้ `labels` เพื่อให้ promtail ใช้กรอง log จาก container ที่ต้องการ
+
+          </aside>
+
+---
+
+### 7. ดู Log ใน Grafana
+
+1. รัน App ด้วยคำสั่ง: `docker compose up -d --build`
+2. ส่ง Request: `curl http://localhost:8080/users/1`
+3. เปิด Grafana: http://localhost:3000 (User: admin, Password: admin)
+4. Data Source → Add data source → **Loki** → URL: http://loki:3100 → Save & test
+5. Explore → Filter ด้วย Label `app=demo-app` → คุณจะเห็น Log จากทุก Layer ใน Request เดียวกัน (`request_id` เดียวกัน)
+
+---
+
+## จุดเด่นแนวทางนี้
+
+- ใช้ **Middleware** สร้าง Logger ต่อ Request พร้อม `Request ID` (Logger ถูกสร้าง 1 ครั้งต่อ Request)
+- เก็บใน `context.Context` → ดึงจากไหนก็ได้
+- แต่ละ Layer ไม่ต้องส่ง Logger เป็น argument
+- Logs จะโยงกันได้หมดใน Grafana Loki
+- ใช้ **Zap** ร่วมกับ **OTel** ได้ถ้าจะต่อ Tracing ในตอนต่อไป
+
+---
+
+## ตอนถัดไป
+
+- ตอนที่ 3 — [ทำ Tracing ด้วย OpenTelemetry และ Tempo](/blog/go/observability-3)
+- ตอนที่ 4 — [เก็บ Metrics ด้วย OpenTelemetry + OTLP Metric (gRPC)](/blog/go/observability-4)

@@ -1,0 +1,459 @@
+---
+title: 'เปิดใช้งาน SSH Server บน Ubuntu 24.04'
+date: '2024-09-27'
+lastmod: '2025-05-22'
+tags: ['ssh', 'ubuntu', '2fa']
+draft: false
+summary: 'เปิดใช้งาน SSH Server บน Ubuntu 24.04'
+---
+
+# เปิดใช้งาน SSH Server บน Ubuntu 24.04
+
+SSH หรือ Secure Shell เป็นโปรโตคอลสื่อสารที่ทำให้เครื่องคอมพิวเตอร์เครื่องหนึ่ง(SSH Client) เข้าถึงหรือเข้าควบคุมคอมพิวเตอร์อีกเครื่องหนึ่ง(SSH Server) แบบระยะไกลได้ ซึ่งในบทความนี้เราจะการเปิดใช้งาน SSH Server บน Ubuntu 24.04 กัน
+
+## หัวข้อในบทความนี้
+
+1. ติดตั้ง SSH Server
+2. ตั้งค่าการใช้งาน SSH Server
+3. ตั้งค่า two-factor authentication
+4. การถอนการติดตั้ง SSH Server
+
+## ติดตั้ง SSH Server
+
+- เริ่มจากอัปเดตและอัปเกรดแพ็กเกจ
+  ```bash
+  sudo apt update && apt -y upgrade
+  ```
+- ติดตั้ง SSH package
+  ```bash
+  sudo apt install openssh-client openssh-server -y
+  ```
+- เปิดใช้งาน SSH Service
+  ```bash
+  sudo systemctl start ssh
+  ```
+- สั่งให้ SSH Service เริ่มทำงานหลัง boot
+  ```bash
+  sudo systemctl enable ssh
+  ```
+- ตรวจสอบสถานะการติดตั้ง
+
+  ```bash
+  sudo systemctl status ssh
+  ```
+
+  ถ้าสำเร็จจะได้แบบนี้
+
+  ```bash
+  ● ssh.service - OpenBSD Secure Shell server
+       Loaded: loaded (/usr/lib/systemd/system/ssh.service; disabled; preset: enabled)
+       Active: active (running) since Fri 2024-09-27 14:25:34 +07; 1min 46s ago
+  TriggeredBy: ● ssh.socket
+         Docs: man:sshd(8)
+               man:sshd_config(5)
+      Process: 3635 ExecStartPre=/usr/sbin/sshd -t (code=exited, status=0/SUCCESS)
+     Main PID: 3637 (sshd)
+        Tasks: 1 (limit: 18437)
+       Memory: 3.6M (peak: 4.5M)
+          CPU: 50ms
+       CGroup: /system.slice/ssh.service
+               └─3637 "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"
+
+  Sep 27 14:25:34 somprasongd-nuc systemd[1]: Starting ssh.service - OpenBSD Secure S>
+  Sep 27 14:25:34 somprasongd-nuc sshd[3637]: Server listening on :: port 22.
+  Sep 27 14:25:34 somprasongd-nuc systemd[1]: Started ssh.service - OpenBSD Secure S
+  ```
+
+  โดยจะเห็นว่า SSH Server เปิดใช้งานอยู่ที่ port `22`
+
+- แนะนำให้เปิดใช้ Firewall ด้วย
+
+  - เปิดใช้งาน Firewall
+    ```bash
+    sudo ufw enable
+    ```
+  - อนุญาตให้ใช้งาน port 22
+    ```bash
+    sudo ufw allow ssh
+    ```
+  - สั่ง reload firewall เพื่อเรียกใช้งานการตั้งค่าใหม่
+    ```bash
+    sudo ufw reload
+    ```
+  - ตรวจสอบสถานะ Firewall
+
+    ```bash
+    sudo ufw status
+    ```
+
+    ต้องได้แบบนี้
+
+    ```bash
+    Status: active
+
+    To                         Action      From
+    --                         ------      ----
+    22/tcp                     ALLOW       Anywhere
+    22/tcp (v6)                ALLOW       Anywhere (v6)
+    ```
+
+    <aside>💡 ถ้าต้องการปิดการใช้งาน Firewall ใช้คำสั่ง `sudo ufw disable`</aside>
+
+- ทดสอบการเชื่อมต่อ จาก SSH Client โดยใช้คำสั่ง
+  ```bash
+  ssh username@ip-address
+  ```
+
+## ตั้งค่าการใช้งาน SSH Server
+
+เราสามารถแก้ไขค่า configuration ของ SSH Server ได้ เช่น เปลี่ยน port หรือให้ login ด้วย public key แทนการใช้ password โดยให้แก้ไขที่ไฟล์ `/etc/ssh/sshd_config`
+
+- ให้ backup ไฟล์ `sshd_config` ก่อน
+  ```bash
+  sudo cp /etc/ssh/sshd_config /etc/ssh/sshd_config.initial
+  ```
+- เปิดไฟล์ขึ้นมาแก้ไข
+  ```bash
+  sudo nano /etc/ssh/sshd_config
+  ```
+- โดยในบทความนี้จะทำ 4 อย่าง คือ
+  - สร้างผู้ใช้งานที่ไม่ใช่ Root
+  - ปิดไม่ให้การ login โดย root
+  - เปลี่ยน port
+  - ให้ login ด้วย Public key
+
+### สร้างผู้ใช้งานที่ไม่ใช่ Root
+
+เพื่อความปลอดภัยไม่ควรให้ `root` สามารถ login เข้ามาได้ ควรสร้างผู้ใช้งานใหม่ขึ้นมาใช้งานแทน มีขั้นตอนดังนี้
+
+- เพิ่มผู้ใช้งานใหม่
+  ```bash
+  adduser <username>
+  ```
+  ระบบจะถามให้ตั้งรหัสผ่านสำหรับผู้ใช้งานใหม่ พร้อมข้อมูลส่วนตัว
+- เพิ่มสิทธิ์ sudo ให้ผู้ใช้งานใหม่
+  ```bash
+  usermod --append --groups sudo <username>
+  ```
+- ให้ logout แล้ว login ด้วย user ใหม่
+
+### ปิดไม่ให้การ login โดย root
+
+เมื่อได้ผู้ใช้งานใหม่ขึ้นมาแล้ว ให้มาจำกัดสิทธิ์ของผู้ใช้งาน `root` ไม่ให้ล็อกอินเข้าระบบโดยตรง ซึ่งมีขั้นตอนดังนี้
+
+- ปิดการ login ด้วย `root` โดยตรง ทำให้เมื่อผู้ใช้ `root` พยายามเข้าสู่ระบบ (เช่นผ่าน SSH หรือ terminal login) ระบบจะปฏิเสธไม่ให้เข้าสู่ shell
+  ```bash
+  sudo usermod root --shell /sbin/nologin
+  ```
+- ล็อครหัสผ่านของผู้ใช้ `root` ทำให้ไม่สามารถเข้าสู่ระบบด้วยรหัสผ่านได้อีก
+  ```bash
+  sudo passwd --lock root
+  ```
+- ปิดการ login ด้วย root ผ่าน SSH โดยเปิดไฟล์ `sudo nano /etc/ssh/sshd_config` ขึ้นมาแก้ไข (ให้หาค่า `#PermitRootLogin prohibit-password` เพื่อเอา comment ออก และแก้เป็น `PermitRootLogin no`)
+
+  ```bash
+  # Authentication:
+
+  #LoginGraceTime 2m
+  PermitRootLogin no
+  #StrictModes yes
+  #MaxAuthTries 6
+  #MaxSessions 10
+  ```
+
+- เพื่อให้การตั้งค่าใหม่มีผล ต้องสั่งให้ SSH Server เริ่มการทำงานใหม่
+  ```bash
+  sudo service ssh restart
+  ```
+
+### เปลี่ยน Port
+
+แนะนำให้เปลี่ยนจากค่าเริ่ม port `22` เป็น port อื่นแทน ในตัวอย่างจะใช้ port `2223`
+
+- เปิดไฟล์ขึ้นมาแก้ไข
+  ```bash
+  sudo nano /etc/ssh/sshd_config
+  ```
+- ให้แก้ที่บรรทัด `#Port 22` โดยเอา `#` ออก และเปลี่ยนจาก `22` เป็นเลขที่ต้องการ เช่น ในบทความนี้จะใช้เป็น `2223`
+
+  ```bash
+  # sshd_config(5) for more information.
+
+  # This sshd was compiled with PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/>
+
+  # The strategy used for options in the default sshd_config shipped with
+  # OpenSSH is to specify options with their default value where
+  # possible, but leave them commented.  Uncommented options override the
+  # default value.
+
+  Include /etc/ssh/sshd_config.d/*.conf
+
+  Port 2223
+  #AddressFamily any
+  #ListenAddress 0.0.0.0
+  #ListenAddress ::
+  ```
+
+- เพื่อให้การตั้งค่าใหม่มีผล ต้องสั่งให้ SSH Server เริ่มการทำงานใหม่
+  ```bash
+  sudo service ssh restart
+  ```
+- ตรวจสอบสถานะ
+
+  ```bash
+  sudo systemctl status ssh
+  ```
+
+  ซึ่งจะเห็นว่า SSH Server เปลี่ยนมาเปิดใช้งานอยู่ที่ port `2223` แล้ว
+
+  ```bash
+  ● ssh.service - OpenBSD Secure Shell server
+       Loaded: loaded (/usr/lib/systemd/system/ssh.service; disabled; preset: enabled)
+       Active: active (running) since Fri 2024-09-27 14:48:15 +07; 1s ago
+  TriggeredBy: ● ssh.socket
+         Docs: man:sshd(8)
+               man:sshd_config(5)
+      Process: 5002 ExecStartPre=/usr/sbin/sshd -t (code=exited, status=0/SUCCESS)
+     Main PID: 5003 (sshd)
+        Tasks: 1 (limit: 18437)
+       Memory: 1.2M (peak: 1.7M)
+          CPU: 19ms
+       CGroup: /system.slice/ssh.service
+               └─5003 "sshd: /usr/sbin/sshd -D [listener] 0 of 10-100 startups"
+
+  Sep 27 14:48:15 somprasongd-nuc systemd[1]: Starting ssh.service - OpenBSD Secure Shell serv>
+  Sep 27 14:48:15 somprasongd-nuc sshd[5003]: Server listening on 0.0.0.0 port 2223.
+  Sep 27 14:48:15 somprasongd-nuc sshd[5003]: Server listening on :: port 2223.
+  ```
+
+- ถ้าเปิดใช้งาน Firewall ต้องอนุญาตให้ใช้งาน port `2223` ด้วย
+
+  - ปิด port 22
+    ```bash
+    sudo ufw delete allow ssh
+    ```
+  - เปิด port 2223
+    ```bash
+    sudo ufw allow 2223
+    ```
+  - สั่ง reload firewall เพื่อเรียกใช้งานการตั้งค่าใหม่
+    ```bash
+    sudo ufw reload
+    ```
+  - ตรวจสอบสถานะ Firewall
+
+    ```bash
+    sudo ufw status
+    ```
+
+    ต้องได้แบบนี้
+
+    ```bash
+    Status: active
+
+    To                         Action      From
+    --                         ------      ----
+    2223                       ALLOW       Anywhere
+    2223 (v6)                  ALLOW       Anywhere (v6)
+    ```
+
+- เมื่อเข้าใช้งานใหม่ ให้เพิ่ม `-p 2223` เข้าไปด้วย
+  ```bash
+  ssh username@ip-address -p 2223
+  ```
+
+### เปิดให้ login ด้วย Public key
+
+- สร้าง key-pair ของ user ที่ต้องการใช้งานบน SSH Server
+  ```bash
+  ssh-keygen -t ed25519
+  ```
+- ในบทความนี้จะตั้งชื่อไฟล์เป็น `ubuntu_key`
+  ```bash
+  Generating public/private ed25519 key pair.
+  Enter file in which to save the key (/home/your-username/.ssh/id_ed25519): /home/your-username/.ssh/ubuntu_key
+  ```
+- ถัดมาจะเป็นการตั้งค่า passphrase แนะนำให้ตั้งค่านี้ด้วย โดยในบทความจะใช้เป็น `myS3cret`
+  ```bash
+  Enter passphrase (empty for no passphrase): myS3cret
+  Enter same passphrase again: myS3cret
+  ```
+- ซึ่งจะมีไฟล์ private key กับ public key ถูกสร้างขึ้นมาที่ `~/.ssh`
+  ```bash
+  ll ~/.ssh
+  total 16
+  drwx------  2 somprasongd somprasongd 4096 Sep 27 15:32 ./
+  drwxr-x--- 17 somprasongd somprasongd 4096 Sep 24 13:39 ../
+  -rw-------  1 somprasongd somprasongd    0 Sep 24 10:19 authorized_keys
+  -rw-------  1 somprasongd somprasongd  464 Sep 27 15:32 ubuntu_key
+  -rw-r--r--  1 somprasongd somprasongd  109 Sep 27 15:32 ubuntu_key.pub
+  ```
+- ให้ทำการคัดลอกค่าในไฟล์ `ubuntu_key.pub` ไปใส่ไว้ที่ไฟล์ `~/.ssh/authorized_keys`
+  ```bash
+  cat ~/.ssh/ubuntu_key.pub >> ~/.ssh/authorized_keys
+  ```
+- ให้ทำการคัดลอกไฟล์ private จาก server มาไว้ที่ client
+  - ให้เปิด terminal ที่ฝั่ง client
+  - ถ้า Client ยังไม่มี `~/.ssh` ให้สร้างขึ้นมาก่อน
+    ```bash
+    mkdir ~/.ssh
+    chmod 700 ~/.ssh
+    ```
+  - คัดลองไฟล์ private key จาก server
+    ```bash
+    scp -P 2297 username@ip-address:/home/your-username/.ssh/ubuntu_key ~/.ssh/
+    ```
+- กลับมาที่ Server ให้ทำการเปิดไฟล์ `sshd_config` มาแก้ไข
+  ```bash
+  sudo nano /etc/ssh/sshd_config
+  ```
+- ให้แก้ไขเป็นแบบนี้
+
+  ```bash
+  # เปิดการใช้งาน SSH Key Authentication
+  PubkeyAuthentication yes
+
+  # ถ้าต้องการปิดการ login ด้วย password ให้แก้ไขเป็น
+  # แนะนำให้ปิด เพื่อลดความเสี่ยงจาก brute-force และ dictionary attack
+  PasswordAuthentication no
+
+  # ใช้ SSH Protocol เวอร์ชัน 2 เท่านั้น ซึ่งเป็นเวอร์ชันที่ ปลอดภัยและเป็นมาตรฐาน
+  Protocol 2
+
+  # จำกัดจำนวนครั้งสูงสุดที่ผู้ใช้สามารถกรอกรหัสผิดได้ = 3 ครั้ง
+  # ป้องกันการ brute-force
+  MaxAuthTries 3
+
+  # ถ้าไม่ใช้ GUI ผ่าน SSH (เช่น remote desktop หรือ X11 apps) ควร uncomment บรรทัดนี้และตั้งเป็น no
+  # ลดช่องโหว่เพิ่มเติมจาก X11 protocol
+  #X11Forwarding no
+  ```
+
+- สั่งให้ SSH Server เริ่มการทำงานใหม่
+  ```bash
+  sudo service ssh restart
+  ```
+- เมื่อเข้าใช้งานใหม่ จะต้องระบุ private key เพื่อใช้ในการยืนยันตัวตน
+  ```bash
+  ssh -i ~/.ssh/ubuntu_key username@ip-address -p 2223
+  ```
+- หากมีการระบุ passphrase ไว้ ให้ใส่ค่าลงไปด้วย
+  ```bash
+  Enter passphrase for key '~/.ssh/ubuntu_key': myS3cret
+  ```
+
+## ตั้งค่า two-factor authentication
+
+เพื่อเพิ่มความปลอดภัยอีกชั้น เราสามารถเปิดใช้งาน two-factor authentication ให้กับ SSH ได้ ซึ่งมีขั้นตอน ดังนี้
+
+- ติดตั้งโมดูล Google Authenticatir PAM
+  ```bash
+  sudo apt install libpam-google-authenticator -y
+  ```
+- เปิดการใช้งาน two-factor authentication โดยรันคำสั่ง
+  ```bash
+  google-authenticator
+  ```
+- จะเจอคำถาม `Do you want authentication tokens to be time-based (y/n)` ให้ตอบ `y`
+- โปรแกรมจะสร้าง QR Code มาให้ ให้เราใช้โปรแกรม Google Authenticator หรือ Microsoft Authenticator ในโทรศัพท์มือถือ เปิดขึ้นมาแสกน เพื่อเพิ่มลงไป
+- เมื่อเพิ่มเสร็จแล้ว จะเอา One-time password มาใส่
+  ```bash
+  Enter code from app (-1 to skip): 344742
+  ```
+- เสร็จแล้วจะได้ emergency code ให้บันทึกเก็บไว้
+- และจะมีคำถามอื่นๆ ขึ้นมา ให้ตอบตามนี้
+
+  ```bash
+  Do you want me to update your "/home/your-username/.google_authenticator" file? (y/n) y
+
+  Do you want to disallow multiple uses of the same authentication
+  token? This restricts you to one login about every 30s, but it increases
+  your chances to notice or even prevent man-in-the-middle attacks (y/n) y
+
+  By default, a new token is generated every 30 seconds by the mobile app.
+  In order to compensate for possible time-skew between the client and the server,
+  we allow an extra token before and after the current time. This allows for a
+  time skew of up to 30 seconds between authentication server and client. If you
+  experience problems with poor time synchronization, you can increase the window
+  from its default size of 3 permitted codes (one previous code, the current
+  code, the next code) to 17 permitted codes (the 8 previous codes, the current
+  code, and the 8 next codes). This will permit for a time skew of up to 4 minutes
+  between client and server.
+  Do you want to do so? (y/n) n
+
+  If the computer that you are logging into isn't hardened against brute-force
+  login attempts, you can enable rate-limiting for the authentication module.
+  By default, this limits attackers to no more than 3 login attempts every 30s.
+  Do you want to enable rate-limiting? (y/n) y
+  ```
+
+- ตั้งค่า SSH เพื่อใช้งานโมดูล Google Authenticatir PAM โดยแก้ไขที่ไฟล์ `/etc/pam.d/sshd`
+  ```bash
+  sudo nano /etc/pam.d/sshd
+  ```
+- ให้เพิ่มข้อความด้านล่างนี้ ลงไปที่บรรทัดสุดท้าย
+  ```bash
+  . . .
+  # Standard Un*x password updating.
+  @include common-password
+  auth required pam_google_authenticator.so nullok
+  auth required pam_permit.so
+  ```
+- แก้ไขไฟล์ `sshd_config`
+  ```bash
+  sudo nano /etc/ssh/sshd_config
+  ```
+- ให้เพิ่มข้อความด้านล่างนี้ ลงไป
+
+  ```bash
+  # Change to yes to enable challenge-response passwords (beware issues with
+  # some PAM modules and threads)
+  KbdInteractiveAuthentication yes
+  AuthenticationMethods publickey,password publickey,keyboard-interactive
+
+  # Change to no to disable tunnelled clear text passwords
+  #PasswordAuthentication no
+  ```
+
+- สั่งให้ SSH Server เริ่มการทำงานใหม่
+  ```bash
+  sudo service ssh restart
+  ```
+- เมื่อทดสอบ login ใหม่ จะรหัมผ่านก่อน และมีให้ใส่ One-time password เพิ่มเข้ามา
+  ```bash
+  Enter passphrase for key '/Users/username/.ssh/ubuntu_key': myS3cret
+  (somprasongd@192.168.1.141) Password: p@ssw0rd
+  (username@ip-address) Verification code: 123456
+  ```
+
+<aside>
+💡
+
+ถ้าต้องการยกเลิกการใช้งานให้ลบไฟล์ `~/.google_authentocator` ทิ้งไป
+
+</aside>
+
+## การถอนการติดตั้ง SSH ออกจาก Ubuntu 24.04
+
+หากไม่ต้องการใช้งาน SSH แล้วสามารถถอนการติดตั้งออกได้ โดยมีขั้นตอนดังนี้
+
+- หยุดการทำงาน SSH Service ก่อน
+  ```bash
+  sudo systemctl stop ssh.service ssh.socket
+  ```
+- ส่งปิดการทำงานหลัง boot
+  ```bash
+  sudo systemctl disable ssh.service ssh.socket
+  ```
+- ลบ SSH Package ออก
+  ```bash
+  sudo apt purge openssh-client openssh-server -y
+  ```
+- ตรวจสอบการถอนการติดตั้ง
+  ```bash
+  ssh -V
+  ```
+  ต้องแสดงแบบนี้
+  ```bash
+  bash: /usr/bin/ssh: No such file or directory
+  ```

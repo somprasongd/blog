@@ -1,0 +1,842 @@
+---
+title: 'Design Patterns ที่นิยมใช้ในภาษา Go'
+date: '2025-03-16'
+lastmod: '2025-03-17'
+tags: ['go']
+draft: false
+summary: 'ในบทความนี้ เราจะมาทำความรู้จักกับ Design Patterns ที่นิยมใช้ในภาษา Go'
+---
+
+# Design Patterns ที่นิยมใช้ในภาษา Go
+
+การออกแบบซอฟต์แวร์ที่ดีต้องคำนึงถึงความสามารถในการขยาย (scalability) และการบำรุงรักษา (maintainability) ซึ่ง **Design Patterns** เป็นหนึ่งในแนวทางที่ช่วยให้โค้ดของเรามีโครงสร้างที่ชัดเจน แยกส่วนความรับผิดชอบ (Separation of Concerns) ได้ดีขึ้น และลดการทำซ้ำ (DRY Principle) ในบทความนี้ เราจะมาทำความรู้จักกับ 7 Design Patterns ที่นิยมใช้ในภาษา Go
+
+- [Factory Pattern](#1-factory-pattern)
+- [Functional Options](#2-functional-options)
+- [Repository Pattern](#3-repository-pattern)
+- [Singleton Pattern](#4-singleton-pattern)
+- [Builder Pattern](#5-builder-pattern)
+- [Adapter Pattern](#6-adapter-pattern)
+- [Decorator Pattern](#7-decorator-pattern)
+- [Worker pool Pattern](#8-worker-pool-pattern)
+
+---
+
+## 1. Factory Pattern
+
+**Factory Pattern** เป็นการสร้างวัตถุ (Object) โดยซ่อนรายละเอียดของการสร้างไว้ในฟังก์ชันหรือเมธอด ใช้ในกรณีที่การสร้างวัตถุต้องมีเงื่อนไขที่ซับซ้อน หรือมีหลายประเภท
+
+### ✅ ข้อดี
+
+- **แยกความรับผิดชอบ (Separation of Concerns):** แยกส่วนของการสร้างอ็อบเจกต์ออกจากส่วนที่ใช้งาน ทำให้การเปลี่ยนแปลงวิธีการสร้างอ็อบเจกต์สามารถทำได้โดยไม่กระทบโค้ดที่ใช้งาน
+- **ลดการจับคู่ (Coupling):** Client ไม่ต้องทราบรายละเอียดของโครงสร้างหรือชนิดของอ็อบเจกต์ที่ถูกสร้าง ลดการผูกมัดกับคลาสที่เฉพาะเจาะจง
+- **รองรับการขยายตัว (Extensibility):** เพิ่มประเภทใหม่ ๆ ของอ็อบเจกต์ได้ง่าย โดยการเพิ่มการรองรับในฟังก์ชัน Factory โดยไม่กระทบโค้ดเดิม
+- **ทำให้โค้ดอ่านง่าย:** การแยกการสร้างอ็อบเจกต์ออกจากการใช้งาน ช่วยให้โค้ดมีความชัดเจนและง่ายต่อการดูแลรักษา
+
+### ❌ ข้อเสีย
+
+- **ความซับซ้อนที่เพิ่มขึ้น:** ในบางกรณีที่โปรเจกต์มีความเรียบง่าย การใช้ Factory Pattern อาจทำให้เกิดความซับซ้อนและจำนวนไฟล์ที่เพิ่มขึ้นโดยไม่จำเป็น
+- **การซ่อนรายละเอียดอาจเป็นอุปสรรค:** หากมีการดีบักหรือแก้ไขปัญหาการสร้างอ็อบเจกต์ การซ่อนรายละเอียดไว้ใน Factory อาจทำให้การติดตามปัญหาทำได้ยากขึ้นเล็กน้อย
+
+### 🎯 Use Case ที่เหมาะสม
+
+- **ระบบที่มีการสร้างอ็อบเจกต์หลายประเภทที่มี interface เดียวกัน:** เช่น ระบบเกมที่มีตัวละครหรืออาวุธที่แตกต่างกัน
+- **การประมวลผลคำสั่งที่หลากหลาย:** เช่น ระบบที่รับคำสั่งต่าง ๆ แล้วต้องสร้างอ็อบเจกต์ที่แตกต่างกันตามประเภทคำสั่ง
+- **การทำงานกับข้อมูลที่มีรูปแบบต่าง ๆ:** เช่น การอ่านไฟล์หลายรูปแบบ (JSON, XML, CSV) และต้องแปลงเป็นอ็อบเจกต์ภายในโปรแกรม
+- **เมื่อการสร้างอ็อบเจกต์มีความซับซ้อน ต้องจัดการ dependency**
+
+### 🔢 วิธีการสร้าง
+
+1. สร้าง **interface** สำหรับวัตถุที่ต้องการผลิต
+2. สร้าง **struct** ที่ implement interface เหล่านั้น
+3. สร้างฟังก์ชัน Factory เพื่อคืนค่าตามประเภทที่ร้องขอ
+
+**ตัวอย่าง:**
+
+สมมติว่าเราต้องสร้าง **Notification** หลายประเภท เช่น Email และ SMS
+
+```go
+package main
+
+import "fmt"
+
+// Notification interface
+type Notification interface {
+	Send(message string)
+}
+
+// EmailNotification implements Notification
+type EmailNotification struct{}
+
+func (e *EmailNotification) Send(message string) {
+	fmt.Println("Sending Email:", message)
+}
+
+// SMSNotification implements Notification
+type SMSNotification struct{}
+
+func (s *SMSNotification) Send(message string) {
+	fmt.Println("Sending SMS:", message)
+}
+
+// Factory function
+func NewNotification(notificationType string) Notification {
+	switch notificationType {
+	case "email":
+		return &EmailNotification{}
+	case "sms":
+		return &SMSNotification{}
+	default:
+		panic("Invalid notification type")
+	}
+}
+
+func main() {
+	// ใช้งาน Factory
+	email := NewNotification("email")
+	email.Send("Hello via Email!")
+
+	sms := NewNotification("sms")
+	sms.Send("Hello via SMS!")
+}
+```
+
+**ผลลัพธ์:**
+
+```go
+Sending Email: Hello via Email!
+Sending SMS: Hello via SMS!
+```
+
+---
+
+## 2. Functional Options
+
+**Functional Options** ไม่ใช่ Design Pattern แต่เป็นแนวทาง (idiom) การเขียนโค้ดใน Go ที่ใช้ฟังก์ชันเป็นอาร์กิวเมนต์เพื่อกำหนดค่าคอนฟิกของ struct แทนการใช้ constructor ที่มีพารามิเตอร์จำนวนมาก
+
+ปกติแล้ว ใน Go เรามักจะใช้ **constructor function** (`NewXXX()`) ในการสร้าง struct และกำหนดค่าต่าง ๆ แต่เมื่อ struct มีพารามิเตอร์จำนวนมาก constructor จะมีข้อเสีย เช่น
+
+- ต้องส่งพารามิเตอร์ทั้งหมด แม้ว่าบางค่าจะไม่จำเป็น
+- การเพิ่มพารามิเตอร์ใหม่อาจทำให้ต้องเปลี่ยนโค้ดที่มีอยู่
+
+**Functional Options** แก้ปัญหานี้โดยใช้ฟังก์ชันเป็นตัวกำหนดค่าพารามิเตอร์แทน
+
+### ✅ ข้อดี
+
+- **เพิ่มความยืดหยุ่น** – สามารถกำหนดค่าที่ต้องการโดยไม่ต้องใช้ constructor ที่รับพารามิเตอร์จำนวนมาก
+- **อ่านง่าย** – Code ที่ใช้งานดูสะอาดขึ้น เพราะสามารถเลือก option ที่ต้องการได้
+- **รองรับค่า Default** – สามารถกำหนดค่าเริ่มต้นได้ง่าย
+
+### ❌ ข้อเสีย
+
+- **Debug ยากขึ้น** – ค่าไม่ถูกกำหนดตายตัว ต้องใช้ฟังก์ชัน callback
+- **Performance Overhead เล็กน้อย** – เนื่องจากต้องใช้ฟังก์ชันและ loop ในการ apply options
+
+### 🎯 Use Case ที่เหมาะสม
+
+- เมื่อ struct มีค่าคอนฟิกหลายตัว อย่างพวก HTTP Client, Database Connection, Server Configuration เช่น สร้าง **REST API Client** ที่รองรับค่า **Base URL, Timeout, Retry Policy, Headers** โดยไม่ต้องเปลี่ยน constructor
+- เมื่อใช้ร่วมกับ Factory Pattern เพื่อสร้าง object แบบ flexible
+- เมื่อโค้ดต้องการรองรับค่า default และสามารถขยายได้ในอนาคต
+
+### 🔢 วิธีการสร้าง
+
+1. ใช้ **ฟังก์ชัน type** เป็น **Option**
+2. ใช้ **variadic function (`...options`)** รับ options หลายตัว
+3. กำหนดค่า default
+4. ใช้ **loop** เพื่อ apply options
+
+```go
+type Option func(*Config)
+
+func NewConfig(options ...Option) *Config {
+    cfg := &Config{}  // ค่า default
+    for _, opt := range options {
+        opt(cfg) // Apply options
+    }
+    return cfg
+}
+```
+
+**ตัวอย่าง วิธีปกติ (Constructor แบบดั้งเดิม):**
+
+```go
+package main
+
+import (
+	"fmt"
+	"net/http"
+	"time"
+)
+
+// APIClient เก็บค่าการตั้งค่า HTTP Client
+type APIClient struct {
+	BaseURL string
+	Client  *http.Client
+}
+
+// NewAPIClient สร้าง APIClient
+func NewAPIClient(baseURL string, timeout time.Duration) *APIClient {
+	return &APIClient{
+		BaseURL: baseURL,
+		Client:  &http.Client{Timeout: timeout},
+	}
+}
+
+func main() {
+	client := NewAPIClient("https://api.example.com", 10*time.Second)
+	fmt.Println("Base URL:", client.BaseURL)
+	fmt.Println("Timeout:", client.Client.Timeout)
+}
+```
+
+**ตัวอย่าง ใช้ Functional Options แทน Constructor:**
+
+```go
+package main
+
+import (
+	"fmt"
+	"net/http"
+	"time"
+)
+
+// APIClient เก็บค่าการตั้งค่า HTTP Client
+type APIClient struct {
+	BaseURL string
+	Client  *http.Client
+}
+
+// APIClientOption คือฟังก์ชันที่ใช้ปรับแต่ง APIClient
+type APIClientOption func(*APIClient)
+
+// WithTimeout กำหนดค่า timeout
+func WithTimeout(timeout time.Duration) APIClientOption {
+	return func(c *APIClient) {
+		c.Client.Timeout = timeout
+	}
+}
+
+// WithBaseURL กำหนดค่า Base URL
+func WithBaseURL(url string) APIClientOption {
+	return func(c *APIClient) {
+		c.BaseURL = url
+	}
+}
+
+// NewAPIClient ใช้ Functional Options
+func NewAPIClient(opts ...APIClientOption) *APIClient {
+	client := &APIClient{
+		BaseURL: "https://default.example.com", // ค่า default
+		Client:  &http.Client{Timeout: 5 * time.Second},
+	}
+
+	// Apply options
+	for _, opt := range opts {
+		opt(client)
+	}
+
+	return client
+}
+
+func main() {
+	// ใช้ค่า default
+	client1 := NewAPIClient()
+	fmt.Println("Client 1:", client1.BaseURL, client1.Client.Timeout)
+
+	// กำหนดค่า Base URL และ Timeout เอง
+	client2 := NewAPIClient(WithBaseURL("https://api.example.com"), WithTimeout(10*time.Second))
+	fmt.Println("Client 2:", client2.BaseURL, client2.Client.Timeout)
+}
+```
+
+**ตารางเปรียบเทียบ:**
+
+| **Feature**              | **Functional Options**                 | Constructor แบบปกติ                 |
+| ------------------------ | -------------------------------------- | ----------------------------------- |
+| **ความยืดหยุ่น**         | ✅ สูง (เพิ่มพารามิเตอร์ได้ง่าย)       | ❌ ต้องเปลี่ยน constructor ทุกครั้ง |
+| **อ่านง่าย**             | ✅ ใช้เฉพาะค่าที่ต้องการ               | ❌ ต้องส่งค่าทั้งหมด                |
+| **ค่า Default**          | ✅ ใช้ค่า default ได้ง่าย              | ❌ ต้องกำหนดค่าเองเสมอ              |
+| **ขยาย (Extensibility)** | ✅ เพิ่ม options ใหม่ได้ง่าย           | ❌ ต้องแก้ไข constructor            |
+| **Debug**                | ❌ ยากขึ้น เพราะค่าถูกกำหนดแบบ dynamic | ✅ ง่ายกว่า                         |
+
+Functional Options เป็นแนวทางการออกแบบที่ช่วยให้โค้ดมีความยืดหยุ่นมากขึ้น ลดการใช้ constructor ที่ต้องรับพารามิเตอร์จำนวนมาก และช่วยให้โค้ดอ่านง่ายขึ้น
+
+---
+
+## 3. Repository Pattern
+
+**Repository Pattern** เป็นการแยกการเข้าถึงข้อมูล (Data Access Layer) ออกจาก Business Logic เพื่อให้โค้ดสะอาดและเปลี่ยนแปลงฐานข้อมูลได้ง่าย
+
+### ✅ ข้อดี
+
+- **แยกความรับผิดชอบ:** ทำให้ business logic ไม่ต้องยุ่งเกี่ยวกับรายละเอียดของการติดต่อกับฐานข้อมูลหรือแหล่งข้อมูลอื่น ๆ
+- **ลด coupling:** Client ทำงานกับ interface ที่กำหนดไว้ ทำให้สามารถเปลี่ยน implementation ของ repository ได้โดยไม่กระทบกับโค้ดที่ใช้งาน
+- **รองรับ unit testing:** การแยกส่วนเข้าถึงข้อมูลออกจาก business logic ทำให้สามารถ mocking repository เพื่อทดสอบได้ง่ายขึ้น
+- **ความยืดหยุ่นในการเปลี่ยนแปลง:** เมื่อมีการเปลี่ยนแปลงในแหล่งข้อมูลหรือวิธีการเข้าถึงข้อมูล สามารถแก้ไขเฉพาะ repository ได้โดยไม่ต้องแก้ไขส่วนอื่นของระบบ
+
+### ❌ ข้อเสีย
+
+- **เพิ่มชั้นการแสดงผล:** ในโปรเจกต์ที่มีความซับซ้อนน้อย การเพิ่ม repository อาจทำให้โค้ดดูมีชั้นที่มากเกินความจำเป็น
+- **ความซับซ้อนในการออกแบบ:** การออกแบบ interface และการแยกส่วนการเข้าถึงข้อมูลให้เหมาะสมอาจต้องใช้เวลาและความเข้าใจในแนวทางของระบบ
+
+### 🎯 Use Case ที่เหมาะสม
+
+- **แอปพลิเคชันที่มีการเข้าถึงข้อมูลจากหลายแหล่ง:** เช่น การอ่านข้อมูลจากฐานข้อมูล หลาย ๆ ตาราง หรือแม้กระทั่งการดึงข้อมูลจาก API ภายนอก
+- **ระบบที่ต้องการทดสอบ business logic โดยไม่ผูกกับฐานข้อมูล:** การใช้ repository ช่วยให้สามารถสร้าง mock object เพื่อนำไปใช้ในการทดสอบได้
+- **ระบบที่มีการเปลี่ยนแปลงแหล่งข้อมูลในอนาคต:** เช่น การเปลี่ยนจากฐานข้อมูล SQL ไปยัง NoSQL หรือการปรับเปลี่ยนวิธีการเข้าถึงข้อมูลโดยไม่กระทบกับ business logic
+
+### 🔢 วิธีการสร้าง
+
+1. สร้าง **Model** ที่ใช้แทนข้อมูล
+2. สร้าง **interface** สำหรับการเข้าถึงข้อมูล
+3. สร้าง implementation ของ interface นั้น
+
+**ตัวอย่าง:**
+
+ใช้ In-Memory repository ในระบบจัดการผู้ใช้งาน
+
+```go
+package main
+
+import (
+	"fmt"
+)
+
+// User model สำหรับข้อมูลผู้ใช้งาน
+type User struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+// UserRepository interface สำหรับการเข้าถึงข้อมูลผู้ใช้งาน
+type UserRepository interface {
+	GetUserByID(id int) (*User, error)
+	CreateUser(user User) error
+}
+
+// InMemoryUserRepository เป็น implementation ที่เก็บข้อมูลใน map
+type InMemoryUserRepository struct {
+	data map[int]User
+}
+
+func NewInMemoryUserRepository() UserRepository {
+	return &InMemoryUserRepository{
+		data: make(map[int]User),
+	}
+}
+
+func (r *InMemoryUserRepository) GetUserByID(id int) (*User, error) {
+	user, ok := r.data[id]
+	if !ok {
+		return nil, fmt.Errorf("User not found")
+	}
+	return &user, nil
+}
+
+func (r *InMemoryUserRepository) CreateUser(user User) error {
+	if _, exists := r.data[user.ID]; exists {
+		return fmt.Errorf("User already exists")
+	}
+	r.data[user.ID] = user
+	return nil
+}
+
+func main() {
+	repo := NewInMemoryUserRepository()
+	// สร้างผู้ใช้งานตัวอย่าง
+	repo.CreateUser(User{ID: 1, Name: "Alice"})
+
+	user, err := repo.GetUserByID(1)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	fmt.Println("Found User:", user.Name)
+}
+```
+
+**ผลลัพธ์:**
+
+```go
+Found User: Alice
+```
+
+---
+
+## 4. Singleton Pattern
+
+**Singleton Pattern** เป็นรูปแบบการออกแบบ (Creational Pattern) ที่กำหนดให้มี instance ของคลาส (หรือ struct ใน Go) เพียงตัวเดียวเท่านั้นในระบบ พร้อมทั้งให้ทุกส่วนของโปรแกรมสามารถเข้าถึง instance นั้นได้อย่างมีระบบ โดยทั่วไปแล้วเราจะใช้กลไกอย่าง `sync.Once` เพื่อให้แน่ใจว่าการสร้าง instance นั้นเกิดขึ้นเพียงครั้งเดียวในสภาวะแวดล้อมที่ทำงานแบบ concurrent
+
+### ✅ ข้อดี
+
+- **ควบคุม instance ได้อย่างชัดเจน:** ช่วยให้แน่ใจว่าจะมี instance เพียงตัวเดียวในระบบ ช่วยป้องกันปัญหาการสร้าง instance ซ้ำในโปรแกรมที่มีการทำงานแบบ concurrent
+- **การเข้าถึงที่ง่ายและทั่วถึง:** ทุกส่วนของโปรแกรมสามารถเรียกใช้ instance เดียวกันได้จากจุดศูนย์กลาง ทำให้การจัดการ state ร่วมเป็นไปอย่างมีประสิทธิภาพ
+- **ประหยัดทรัพยากร:** เนื่องจากมีการสร้าง instance เพียงครั้งเดียว จึงช่วยลดภาระของการสร้างอ็อบเจกต์ซ้ำ ๆ ที่อาจมีค่าใช้จ่ายสูงในการสร้างหรือเชื่อมต่อทรัพยากรต่าง ๆ
+
+### ❌ ข้อเสีย
+
+- **การทดสอบ (Unit Testing) อาจซับซ้อน:** การมี instance เพียงตัวเดียวอาจทำให้การทดสอบในระดับแยกส่วนยากขึ้น เนื่องจาก state ที่ถูกแชร์กันในหลายส่วนของโปรแกรม
+- **เกิดความเชื่อมโยง (Tight Coupling):** เมื่อหลายส่วนของระบบพึ่งพา Singleton โดยตรง การเปลี่ยนแปลงใน Singleton อาจส่งผลกระทบต่อส่วนอื่น ๆ ได้
+- **ข้อควรระวังในสภาวะ concurrent:** แม้ว่า Go จะมีเครื่องมืออย่าง `sync.Once` แต่การใช้งาน Singleton ในระบบที่มีการทำงานพร้อมกันสูง จำเป็นต้องออกแบบอย่างระมัดระวังเพื่อหลีกเลี่ยงปัญหาการแข่งขัน (race condition)
+
+### 🎯 Use Case ที่เหมาะสม
+
+- **การจัดการ configuration:** เช่น โหลดไฟล์ configuration เพียงครั้งเดียวแล้วแชร์ข้อมูลนั้นไปยังทุกส่วนของโปรแกรม
+- **การเชื่อมต่อฐานข้อมูล:** เมื่อเชื่อมต่อกับฐานข้อมูลควรสร้าง connection pool เพียงครั้งเดียวและให้ทุกส่วนของโปรแกรมใช้ instance เดียวกัน
+- **การจัดการ logger:** ใช้ logger instance เพียงตัวเดียวเพื่อเก็บ log ของโปรแกรม ทำให้การจัดการ log มีความเป็นระเบียบและสามารถควบคุมระดับ log ได้ง่ายขึ้น
+
+### 🔢 วิธีการสร้าง
+
+1. สร้างตัวแปรที่เก็บ instance
+2. ใช้ `sync.Once` เพื่อสร้างเพียงครั้งเดียว
+
+**ตัวอย่าง:**
+
+การเก็บ configuration ของแอปพลิเคชัน
+
+```go
+package main
+
+import (
+	"fmt"
+	"net/http"
+	"sync"
+)
+
+// Config เก็บ configuration ของแอปพลิเคชัน
+type Config struct {
+	AppName string `json:"app_name"`
+	Port    int    `json:"port"`
+}
+
+var configInstance *Config
+var once sync.Once
+
+func GetConfig() *Config {
+	once.Do(func() {
+		configInstance = &Config{
+			AppName: "My REST API",
+			Port:    8080,
+		}
+	})
+	return configInstance
+}
+
+func main() {
+	config := GetConfig()
+	config2 := GetConfig()
+
+	fmt.Println(config == config2) // true
+
+	http.ListenAndServe(fmt.Sprintf(":%d", config.Port), nil)
+}
+```
+
+**ผลลัพธ์:**
+
+```go
+true
+```
+
+---
+
+## 5. Builder Pattern
+
+**Builder Pattern** ช่วยให้การสร้างอ็อบเจ็กต์ที่ซับซ้อนทำได้ง่ายขึ้น ด้วยการแยกขั้นตอนการสร้างออกจากกัน ร่วมกับ **Fluent Interface** ที่เป็นแนวทางการออกแบบ API ที่ให้แต่ละ method ที่เรียกใช้งานสามารถคืนค่า instance ของ object เดิม (หรือ builder ในที่นี้) กลับไป ทำให้สามารถเรียก chain method ซึ่งจะช่วยให้โค้ดมีความกระชับและเข้าใจได้ง่าย
+
+```go
+// ตัวอย่างการเรียกใช้งานแบบ chain method
+builder.SetCPU("Intel i9").SetRAM(32).Build()
+```
+
+### ✅ ข้อดี
+
+- **ความชัดเจน:** การแบ่งขั้นตอนการสร้างอ็อบเจกต์ออกเป็นส่วน ๆ ช่วยให้โค้ดอ่านและเข้าใจง่าย
+- **ยืดหยุ่น:** รองรับการสร้างอ็อบเจกต์ที่มีพารามิเตอร์หลายตัวและอ็อบเจกต์ที่ซับซ้อน
+- **รองรับ Method Chaining:** ด้วย Fluent Interface ทำให้สามารถเรียกใช้งานแบบ chain method ซึ่งช่วยลดบรรทัดโค้ดและเพิ่มความเป็นธรรมชาติในการอ่าน
+- **การบำรุงรักษาง่าย:** แยก logic ของการสร้างออกจาก business logic ทำให้แก้ไขหรือขยายได้ง่าย
+
+### ❌ ข้อเสีย
+
+- **เพิ่มความซับซ้อน:** ในโปรเจกต์ที่มีความซับซ้อนน้อย การนำ Builder Pattern มาใช้อาจทำให้โค้ดดูมีชั้นมากเกินความจำเป็น
+- **ค่าใช้จ่ายในการออกแบบ:** อาจต้องใช้เวลาพอสมควรในการออกแบบ Builder และจัดการกับ method chaining ให้เหมาะสม
+- **Overhead:** สำหรับอ็อบเจกต์ที่สร้างได้ง่าย การใช้ Builder Pattern อาจเพิ่ม overhead ที่ไม่จำเป็น
+
+### 🎯 Use Case ที่เหมาะสม
+
+- **อ็อบเจกต์ที่มีพารามิเตอร์มาก:** เช่น การสร้าง configuration, การตั้งค่าระบบ หรือการสร้างอ็อบเจกต์ที่มีหลายส่วนประกอบที่สามารถกำหนดค่าได้
+- **การอ่านโค้ดที่ต้องการความชัดเจน:** เมื่อการสร้างอ็อบเจกต์ต้องการความเข้าใจในแต่ละขั้นตอน Fluent Interface จะช่วยให้โค้ดดูอ่านง่าย
+- **ระบบที่มีการเปลี่ยนแปลงค่า parameter บ่อย:** สามารถปรับเปลี่ยนหรือเพิ่ม method ใน Builder ได้โดยไม่กระทบส่วนที่ใช้งาน
+
+### 🔢 วิธีการสร้าง
+
+1. สร้าง struct ของ builder
+2. เพิ่มเมธอดสำหรับกำหนดค่าทีละขั้นตอน
+3. ใช้เมธอด `Build()` เพื่อคืนค่า
+
+**ตัวอย่าง:**
+
+```go
+package main
+
+import "fmt"
+
+// Response โครงสร้างสำหรับ JSON response
+type Response struct {
+	Status  int         `json:"status"`
+	Message string      `json:"message"`
+	Data    interface{} `json:"data,omitempty"`
+}
+
+// ResponseBuilder ใช้สำหรับสร้าง response ด้วยวิธี chain method
+type ResponseBuilder struct {
+	response Response
+}
+
+func NewResponseBuilder() *ResponseBuilder {
+	return &ResponseBuilder{}
+}
+
+func (b *ResponseBuilder) SetStatus(status int) *ResponseBuilder {
+	b.response.Status = status
+	return b
+}
+
+func (b *ResponseBuilder) SetMessage(message string) *ResponseBuilder {
+	b.response.Message = message
+	return b
+}
+
+func (b *ResponseBuilder) SetData(data interface{}) *ResponseBuilder {
+	b.response.Data = data
+	return b
+}
+
+func (b *ResponseBuilder) Build() Response {
+	return b.response
+}
+
+func main() {
+	// สร้าง Response โดยใช้ Builder และ chain method ด้วย Fluent Interface
+	response := NewResponseBuilder().
+		SetStatus(200).
+		SetMessage("Success").
+		SetData(map[string]string{"key": "value"}).
+		Build()
+
+	fmt.Printf("Response: %+v\n", response)
+}
+```
+
+**ผลลัพธ์:**
+
+```go
+Response: {Status:200 Message:Success Data:map[key:value]}
+```
+
+---
+
+## 6. Adapter Pattern
+
+**Adapter Pattern** เป็นการทำให้สอง interface ที่แตกต่างกันสามารถทำงานร่วมกันได้ ซึ่งช่วยให้เราสามารถใช้โค้ดเก่าร่วมกับโค้ดใหม่ได้ โดยไม่ต้องเปลี่ยนแปลงโครงสร้างเดิม
+
+### ✅ ข้อดี
+
+- **ช่วยให้โค้ดทำงานร่วมกันได้** – สามารถใช้โค้ดเก่ากับ API ใหม่ได้โดยไม่ต้องเปลี่ยนแปลงโค้ดเดิม
+- **ลดการแก้ไขโค้ดที่มีอยู่** – เหมาะสำหรับการใช้ไลบรารีหรือโมดูลที่ไม่มีโค้ดต้นฉบับให้แก้ไข
+- **ปรับปรุงการอ่านโค้ด** – แทนที่จะเขียนโค้ดแปลงข้อมูลในหลาย ๆ ที่ การใช้ Adapter ทำให้โค้ดเป็นระบบมากขึ้น
+
+### ❌ ข้อเสีย
+
+- **เพิ่มความซับซ้อน** – ต้องสร้างโครงสร้าง Adapter เพิ่มขึ้นมา ทำให้มีโค้ดเพิ่มขึ้น
+- **อาจมี overhead** – ในบางกรณี การแปลงข้อมูลหรือเรียก method ผ่าน Adapter อาจทำให้ประสิทธิภาพลดลง
+
+### 🎯 Use Case ที่เหมาะสม
+
+- ต้องการ **ใช้ไลบรารีเก่ากับโค้ดใหม่** โดยไม่ต้องแก้ไขไลบรารี
+- ต้องการ **รองรับหลาย API ที่แตกต่างกัน** โดยใช้ Adapter เป็นตัวกลาง
+- ต้องการ **แปลงข้อมูลระหว่างระบบ** เช่น แปลง JSON จาก API ภายนอกให้ตรงกับโครงสร้างของแอปพลิเคชัน
+
+### 🔢 วิธีการสร้าง
+
+1. สร้าง interface ต้นทางและปลายทาง
+2. สร้าง Adapter เพื่อแปลง interface
+
+**ตัวอย่าง:**
+
+นำข้อมูลจากบริการสภาพอากาศภายนอกมาแปลงให้ตรงกับโครงสร้างที่เราต้องการ
+
+```go
+package main
+
+import "fmt"
+
+// WeatherResponse คือโครงสร้างที่ API ของเราต้องการ
+type WeatherResponse struct {
+	Temperature float64 `json:"temperature"`
+	Condition   string  `json:"condition"`
+}
+
+// ExternalWeatherService จำลองบริการภายนอกที่ให้ข้อมูลในรูปแบบ map
+type ExternalWeatherService struct{}
+
+func (e *ExternalWeatherService) GetWeather(location string) map[string]interface{} {
+	// จำลองการเรียก API ภายนอก
+	return map[string]interface{}{
+		"temp": 30.5,
+		"desc": "Sunny",
+	}
+}
+
+// WeatherServiceAdapter ปรับข้อมูลจาก ExternalWeatherService ให้เป็น WeatherResponse
+type WeatherServiceAdapter struct {
+	external *ExternalWeatherService
+}
+
+func (a *WeatherServiceAdapter) GetWeather(location string) WeatherResponse {
+	data := a.external.GetWeather(location)
+	return WeatherResponse{
+		Temperature: data["temp"].(float64),
+		Condition:   data["desc"].(string),
+	}
+}
+
+func main() {
+	external := &ExternalWeatherService{}
+	adapter := &WeatherServiceAdapter{external: external}
+	weather := adapter.GetWeather("Phuket")
+
+	fmt.Printf("Temperature: %.2f\n", weather.Temperature)
+	fmt.Printf("Condition: %s\n", weather.Condition)
+}
+```
+
+**ผลลัพธ์:**
+
+```go
+Temperature: 30.50
+Condition: Sunny
+```
+
+---
+
+## 7. Decorator Pattern
+
+**Decorator Pattern** เป็นการเพิ่มความสามารถ (behavior) ให้กับอ็อบเจ็กต์โดยไม่ต้องแก้ไขโค้ดเดิมหรือสร้างคลาสใหม่ที่สืบทอดมาจากอ็อบเจ็กต์ต้นฉบับต้นฉบับ ผ่านการห่อหุ้ม (wrap) อ็อบเจ็กต์เดิมด้วยอ็อบเจ็กต์ใหม่
+
+### ✅ ข้อดี
+
+- **ยืดหยุ่น** – สามารถเพิ่มฟังก์ชันใหม่ได้โดยไม่ต้องแก้ไขโค้ดเดิม
+- **หลีกเลี่ยงการใช้ Inheritance** – ลดการสร้างคลาสที่ซับซ้อนจากการสืบทอดหลายชั้น
+- **แยกความรับผิดชอบ (Separation of Concerns)** – แต่ละ decorator มีหน้าที่เฉพาะ เช่น **logging, caching, validation**
+- **สามารถใช้ร่วมกันได้** – Decorator หลายตัวสามารถรวมกันเพื่อสร้างพฤติกรรมใหม่ ๆ ได้
+
+### ❌ **ข้อเสีย**
+
+- **เพิ่มความซับซ้อน** – มีหลายเลเยอร์ของ decorator อาจทำให้โค้ดอ่านยาก
+- **ต้องมีการจัดการหลายระดับ** – ต้องแน่ใจว่าเรียก decorator ในลำดับที่ถูกต้อง
+
+### 🎯 Use Case ที่เหมาะสม
+
+- **เพิ่มการล็อก (Logging)** ให้กับฟังก์ชันที่มีอยู่
+- **เพิ่มการแคช (Caching)** สำหรับ API call หรือ database query
+- **เพิ่มการตรวจสอบสิทธิ์ (Authorization)** ก่อนเรียกใช้งานบางฟังก์ชัน
+- **เพิ่มการจำกัดความเร็ว (Rate Limiting)** สำหรับ API หรือ service call
+
+### **🔢 วิธีการสร้าง**
+
+1. สร้าง interface หลัก
+2. สร้าง Decorator ที่ implement interface
+
+**ตัวอย่าง:**
+
+เพิ่มการล็อก (Logging) ให้กับฟังก์ชันที่มีอยู่
+
+```go
+package main
+
+import "fmt"
+
+// Notifier interface
+type Notifier interface {
+	Send(message string)
+}
+
+// BasicNotifier (Concrete Component)
+type BasicNotifier struct{}
+
+func (n *BasicNotifier) Send(message string) {
+	// จำลองการทำงาน
+	fmt.Println("Sending message")
+}
+
+// LoggingDecorator (Decorator)
+type LoggingDecorator struct {
+	notifier Notifier
+}
+
+func NewLoggingDecorator(n Notifier) Notifier {
+	return &LoggingDecorator{notifier: n}
+}
+
+func (l *LoggingDecorator) Send(message string) {
+	fmt.Println("[Log] Message:", message)
+	l.notifier.Send(message)
+}
+
+// EncryptionDecorator (Decorator)
+type EncryptionDecorator struct {
+	notifier Notifier
+}
+
+func NewEncryptionDecorator(n Notifier) Notifier {
+	return &EncryptionDecorator{notifier: n}
+}
+
+func (e *EncryptionDecorator) Send(message string) {
+	encryptedMessage := "Encrypted(" + message + ")"
+	e.notifier.Send(encryptedMessage)
+}
+
+func main() {
+	notifier := &BasicNotifier{}
+
+	// เพิ่ม Logging
+	logNotifier := NewLoggingDecorator(notifier)
+
+	// เพิ่ม Encryption
+	secureNotifier := NewEncryptionDecorator(logNotifier)
+
+	secureNotifier.Send("Hello, World!")
+}
+```
+
+**ผลลัพธ์:**
+
+```go
+[Log] Message: Encrypted(Hello, World!)
+Sending message
+```
+
+---
+
+## 8. Worker Pool Pattern
+
+**Worker Pool Pattern** ใช้สำหรับการประมวลผลงานจำนวนมาก โดยการกระจายงานไปยัง Worker หลายตัวทำพร้อมกัน (concurrency) ทำให้ประสิทธิภาพของระบบเพิ่มขึ้น
+
+### ✅ ข้อดี
+
+- **ควบคุมจำนวน goroutines** – ลดการใช้หน่วยความจำและการบริหารจัดการ goroutines ที่มากเกินไป
+- **ปรับปรุงประสิทธิภาพ** – งานสามารถประมวลผลพร้อมกันได้แบบขนาน
+- **หลีกเลี่ยงปัญหา resource exhaustion** – ป้องกันการสร้าง goroutines มากเกินไปจนกิน CPU หรือ RAM
+- **สามารถใช้งานได้กับงานที่ต้องทำซ้ำ ๆ** – เช่น การประมวลผลไฟล์, การร้องขอ API, หรือการทำ data processing
+
+### ❌ ข้อเสีย
+
+- **เพิ่มความซับซ้อน** – ต้องออกแบบโค้ดให้สามารถรับ-ส่งงานระหว่าง workers และ main thread ได้อย่างถูกต้อง
+- **ต้องจัดการการปิด worker pool** – หากไม่ปิด properly อาจเกิดปัญหา memory leak หรือ deadlock
+
+### 🎯 Use Case ที่เหมาะสม
+
+- **การประมวลผลข้อมูลจำนวนมาก** (เช่น แปลงไฟล์, แปลงรูปภาพ)
+- **การโหลดหรือดึงข้อมูลจาก API แบบขนาน**
+- **การส่งอีเมลจำนวนมาก**
+- **การทำงานที่ต้องการจำกัดจำนวน concurrent workers**
+
+### 🔢 วิธีการสร้าง
+
+1. กำหนดจำนวน Worker และงาน (Jobs)
+2. ใช้ Channel ในการรับส่งข้อมูลระหว่าง Worker
+3. ใช้ `go` ในการสร้าง Goroutine สำหรับ Worker แต่ละตัว
+
+**ตัวอย่าง:**
+
+```go
+package main
+
+import (
+	"fmt"
+	"math/rand"
+	"sync"
+	"time"
+)
+
+// Worker function
+func worker(id int, jobs <-chan int, results chan<- int, wg *sync.WaitGroup) {
+	defer wg.Done()
+	for job := range jobs {
+		fmt.Printf("Worker %d กำลังประมวลผลงาน %d\n", id, job)
+		time.Sleep(time.Duration(rand.Intn(3)) * time.Second) // จำลองเวลาประมวลผล
+		fmt.Printf("Worker %d จบการทำงาน %d\n", id, job)
+		results <- job * 2
+	}
+}
+
+func main() {
+	numWorkers := 3   // จำนวน worker ที่ต้องการใช้
+	numJobs := 5     // จำนวนงานที่ต้องประมวลผล
+
+	jobs := make(chan int, numJobs)
+	results := make(chan int, numJobs)
+	var wg sync.WaitGroup
+
+	// สร้าง workers
+	for i := 1; i <= numWorkers; i++ {
+		wg.Add(1)
+		go worker(i, jobs, results, &wg)
+	}
+
+	// ส่งงานเข้า queue
+	for j := 1; j <= numJobs; j++ {
+		jobs <- j
+	}
+	close(jobs) // ปิด channel เพื่อบอก worker ว่าไม่มีงานใหม่แล้ว
+
+	// รอให้ worker ทำงานเสร็จทั้งหมด
+	wg.Wait()
+	close(results)
+
+	// แสดงผลลัพธ์
+	for result := range results {
+		fmt.Println("ผลลัพธ์:", result)
+	}
+}
+```
+
+**ผลลัพธ์ (ลำดับอาจเปลี่ยนตามการประมวลผล):**
+
+```
+Worker 3 กำลังประมวลผลงาน 1
+Worker 1 กำลังประมวลผลงาน 2
+Worker 2 กำลังประมวลผลงาน 3
+Worker 2 จบการทำงาน 3
+Worker 2 กำลังประมวลผลงาน 4
+Worker 2 จบการทำงาน 4
+Worker 2 กำลังประมวลผลงาน 5
+Worker 2 จบการทำงาน 5
+Worker 3 จบการทำงาน 1
+Worker 1 จบการทำงาน 2
+ผลลัพธ์: 6
+ผลลัพธ์: 8
+ผลลัพธ์: 10
+ผลลัพธ์: 2
+ผลลัพธ์: 4
+```
+
+---
+
+## **สรุป**
+
+ในบทความนี้เราได้เรียนรู้ **Design Patterns** หลายรูปแบบในภาษา Go พร้อมตัวอย่างการใช้งานที่ครอบคลุมสถานการณ์จริง ได้แก่:
+
+| **Design Pattern**      | **วัตถุประสงค์**                                 | **Use Case**                                  | **หลักการสร้าง**                               |
+| ----------------------- | ------------------------------------------------ | --------------------------------------------- | ---------------------------------------------- |
+| **Factory Pattern**     | สร้างอ็อบเจ็กต์หลายประเภทผ่านฟังก์ชันกลาง        | สร้าง Notification (Email, SMS)               | สร้าง interface และ factory function           |
+| **Repository Pattern**  | แยกการเข้าถึงข้อมูลออกจาก Business Logic         | จัดการข้อมูลในฐานข้อมูล (CRUD Operations)     | สร้าง interface และ implementation             |
+| **Singleton Pattern**   | รับประกันว่ามี instance เดียวในโปรแกรม           | Database Connection, Configuration            | ใช้ `sync.Once` เพื่อสร้างอ็อบเจ็กต์ครั้งเดียว |
+| **Builder Pattern**     | สร้างอ็อบเจ็กต์ที่มีฟิลด์หลายตัวแบบเป็นขั้นตอน   | สร้าง User Object ที่มีหลายฟิลด์              | สร้าง builder struct พร้อม chain methods       |
+| **Adapter Pattern**     | ทำให้ interface ที่เข้ากันไม่ได้ทำงานร่วมกันได้  | ใช้งาน API ของบุคคลที่สาม (Third-party API)   | สร้าง adapter struct เพื่อแปลง interface       |
+| **Decorator Pattern**   | เพิ่มความสามารถให้กับอ็อบเจ็กต์โดยไม่แก้โค้ดเดิม | เพิ่ม logging, caching หรือ encryption        | สร้าง decorator struct ที่ wrap object         |
+| **Worker Pool Pattern** | ประมวลผลงานจำนวนมากแบบขนาน                       | การประมวลผลที่ต้องทำซ้ำ เช่น ส่งอีเมลจำนวนมาก | ใช้ Channel และ Goroutines                     |
+
+การเลือกใช้ Design Patterns ที่เหมาะสมจะช่วยให้โค้ดมีความยืดหยุ่น พร้อมรับการเปลี่ยนแปลง และขยายตัวได้ง่ายขึ้นในอนาคต

@@ -1,0 +1,432 @@
+---
+title: 'Correlation Logging: ตอนที่ 1 ให้ Log รู้ว่าเกิดจาก Request เดียวกัน'
+date: '2025-07-04'
+lastmod: '2025-07-04'
+tags: ['go', 'logger']
+draft: false
+summary: 'ใช้ Request ID, NGINX Proxy และ Go Fiber'
+---
+
+# Correlation Logging: ตอนที่ 1 ให้ Log รู้ว่าเกิดจาก Request เดียวกัน
+
+เคยไหม? เปิด log ไฟล์มาแล้วต้องกวาดตาดู Stack Trace วนเป็นชั่วโมง กว่าจะเจอว่า Error อันนี้มาจาก Request ไหน แล้วถ้าเจอ Request หนึ่งกระจายยิงหลาย Service ยิ่งวุ่นเข้าไปใหญ่
+
+นี่คือที่มาของ **Request ID** หรือบางคนเรียกว่า **Correlation ID** — ตัวช่วยเล็ก ๆ ที่ทำให้ Distributed Logging เป็นเรื่องง่ายขึ้น
+
+บทความนี้จะพาไปดูวิธีทำ **End-to-End Correlated Logging** ตั้งแต่
+
+- Proxy ชั้นนอก (NGINX)
+- จนถึง Backend (Go Fiber)
+- และวิธีส่งต่อ ID นี้ไปทั้ง Layer: Handler → Service → Repository
+
+พร้อมตัวอย่างโค้ดจริง เอาไปต่อยอดได้เลย
+
+---
+
+## ทำไมต้องมี Request ID?
+
+เวลามี Request เข้า Service, เราอยากรู้ว่า:
+
+- Log ไหนเป็นของ Request ไหน
+- ถ้า Request เดียวกันทำงานหลาย Layer หรือเรียกหลาย Service, ทุก Log ต้องมี ID เดียวกัน
+
+พอมี ID เดียวกัน เราจะ Search, Filter, Trace ข้ามระบบได้ง่าย (โดยเฉพาะถ้าใช้ OpenTelemetry หรือ ELK, Loki, Jaeger)
+
+---
+
+## ภาพรวม Architecture
+
+- **NGINX**: ทำหน้าที่ Proxy, inject `X-Request-ID` ถ้ายังไม่มี
+- **Fiber Middleware** รับ `X-Request-ID` แล้วสร้าง Logger ฝัง `request_id` ใส่ `context.Context`
+- **Layered Architecture**: แบ่ง `Handler` → `Service` → `Repository` ทุก Layer รับ Context และดึง Logger จาก Context เท่านั้น
+- **Logger**: ใช้ **Uber Zap Logger** ซึ่งเป็น Production-ready logger ที่นิยมใน Go
+
+---
+
+## โครงสร้างไฟล์โปรเจกต์
+
+```bash
+project/
+ ├── cmd/
+ │   └── main.go
+ ├── middleware/
+ │   └── request_context.go
+ ├── handler/
+ │   └── user_handler.go
+ ├── service/
+ │   └── user_service.go
+ ├── repository/
+ │   └── user_repository.go
+ ├── Dockerfile
+ ├── docker-compose.yml
+ ├── nginx.conf
+ ├── go.mod
+ └── go.sum
+```
+
+---
+
+## Config NGINX ให้ใส่ `X-Request-ID`
+
+เริ่มที่ Proxy ก่อน สมมติคุณมี `nginx.conf` ประมาณนี้:
+
+```bash
+http {
+  server {
+    listen 80;
+
+    location / {
+      # ถ้ามี X-Request-ID แล้ว ให้ใช้ของเดิม
+      # ถ้าไม่มี ให้ generate ใหม่จาก $request_id ของ NGINX
+      proxy_set_header X-Request-ID $request_id;
+
+      proxy_pass http://backend;
+    }
+  }
+
+  # ตั้ง backend upstream
+  upstream backend {
+    server app:3000;
+  }
+}
+```
+
+**Tip:**
+
+- `$request_id` ของ NGINX คือ Unique ID ที่ NGINX generate ให้แต่ละ Request
+- ถ้าข้างหน้ามี Load Balancer ที่ generate ไว้แล้ว หรือ Client ส่ง `X-Request-ID` มาก่อนแล้ว `$request_id` ของ NGINX จะ preserve ให้โดยอัตโนมัติ
+
+---
+
+## Fiber Middleware: สร้าง Request ID และ Logger
+
+ต่อมาใน Go Fiber เราต้องทำ Middleware ดึง `X-Request-ID` ใส่ logger
+
+### สร้าง Context Key
+
+```go
+// ctxkey/ctxkey.go
+package ctxkey
+
+type key int
+
+const (
+	Logger key = iota
+	RequestID
+)
+```
+
+### สร้าง Logger
+
+```go
+// logger/logger.go
+package logger
+
+import (
+	"context"
+	"demo-logger/ctxkey"
+
+	"go.uber.org/zap"
+)
+
+var baseLogger *zap.Logger
+
+func InitLogger() {
+	l, _ := zap.NewProduction()
+	baseLogger = l.With(zap.String("app_name", "demo-logger"))
+}
+
+func Default() *zap.Logger {
+	return baseLogger
+}
+
+func Logger(ctx context.Context) *zap.Logger {
+	log, ok := ctx.Value(ctxkey.Logger).(*zap.Logger)
+	if ok {
+		return log
+	}
+	return baseLogger
+}
+
+```
+
+### สร้าง Middleware
+
+```go
+// middleware/request_context.go
+package middleware
+
+import (
+	"context"
+	"demo-logger/ctxkey"
+	"demo-logger/logger"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/google/uuid"
+	"go.uber.org/zap"
+)
+
+func RequestContext() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		reqID := c.Get("X-Request-ID")
+		if reqID == "" {
+			reqID = uuid.New().String()
+		}
+
+		// Bind Request ID ลง Response Header
+		c.Set("X-Request-ID", reqID)
+
+		// สร้าง child logger
+		reqLogger := logger.Default().With(zap.String("request_id", reqID))
+
+		// สร้าง Context ใหม่
+		ctx := context.WithValue(c.Context(), ctxkey.RequestID, reqID)
+		ctx = context.WithValue(ctx, ctxkey.Logger, reqLogger)
+
+		// แทน Context เดิม
+		c.SetUserContext(ctx)
+
+		return c.Next()
+	}
+}
+```
+
+---
+
+## Handler → Service → Repository ใช้ Logger จาก Context
+
+### Handler
+
+```go
+// handler/user_handler.go
+package handler
+
+import (
+	"demo-logger/logger"
+	"demo-logger/service"
+
+	"github.com/gofiber/fiber/v2"
+	"go.uber.org/zap"
+)
+
+type UserHandler struct {
+	svc *service.UserService
+}
+
+func NewUserHandler(svc *service.UserService) *UserHandler {
+	return &UserHandler{svc: svc}
+}
+
+func (h *UserHandler) GetUser(c *fiber.Ctx) error {
+	userID := c.Params("id")
+
+  // ใช้ UserContext() เพราะใส่ logger ไว้ที่นี่
+	user, err := h.svc.GetUser(c.UserContext(), userID)
+	if err != nil {
+		// ดึง logger จาก context
+		logger.FromContext(c.UserContext()).Error("failed to get user")
+		return c.Status(fiber.StatusInternalServerError).SendString("error")
+	}
+
+  // ดึง logger จาก context
+	logger.FromContext(c.UserContext()).Info("success get user", zap.String("user_id", userID))
+
+	return c.JSON(user)
+}
+```
+
+---
+
+### Service
+
+```go
+// service/user_service.go
+package service
+
+import (
+	"context"
+	"demo-logger/logger"
+	"demo-logger/repository"
+
+	"go.uber.org/zap"
+)
+
+type UserService struct {
+	repo *repository.UserRepository
+}
+
+func NewUserService(repo *repository.UserRepository) *UserService {
+	return &UserService{repo: repo}
+}
+
+func (s *UserService) GetUser(ctx context.Context, userID string) (any, error) {
+  // ดึง logger จาก context
+	logger.FromContext(ctx).Info("calling repo", zap.String("user_id", userID))
+
+	return s.repo.FindByID(ctx, userID)
+}
+```
+
+---
+
+### Repository
+
+```go
+// repository/user_repository.go
+package repository
+
+import (
+	"context"
+	"demo-logger/logger"
+
+	"go.uber.org/zap"
+)
+
+type UserRepository struct {
+	// DB connection
+}
+
+func NewUserRepository() *UserRepository {
+	return &UserRepository{}
+}
+
+func (r *UserRepository) FindByID(ctx context.Context, userID string) (any, error) {
+  // ดึง logger จาก context
+	logger.FromContext(ctx).Info("querying database", zap.String("user_id", userID))
+
+	// สมมติคืน mock user
+	return map[string]string{"id": userID, "name": "ball"}, nil
+}
+```
+
+---
+
+### Main
+
+```go
+// cmd/main.go
+package main
+
+import (
+	"demo-logger/handler"
+	"demo-logger/logger"
+	"demo-logger/middleware"
+	"demo-logger/repository"
+	"demo-logger/service"
+
+	"github.com/gofiber/fiber/v2"
+)
+
+func main() {
+	logger.InitLogger()
+
+	app := fiber.New()
+	app.Use(middleware.RequestContext())
+
+	repo := repository.NewUserRepository()
+	svc := service.NewUserService(repo)
+	hdl := handler.NewUserHandler(svc)
+
+	app.Get("/user/:id", hdl.GetUser)
+
+	app.Listen(":3000")
+}
+```
+
+---
+
+## Build: สร้าง Dockerfile และ docker-compose
+
+### Dockerfile
+
+```docker
+# ---------- STAGE 1: Build ----------
+FROM golang:1.24 AS builder
+
+# Set working dir
+WORKDIR /app
+
+# Copy go.mod and go.sum first for caching dependencies
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy the source code
+COPY . .
+
+# Build binary - youสามารถเปลี่ยนชื่อได้ตามต้องการ
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o app ./cmd/main.go
+
+# ---------- STAGE 2: Run ----------
+FROM alpine:latest
+
+# ทำให้ binary ทำงานได้ (สำหรับบาง lib เช่น timezone)
+RUN apk --no-cache add ca-certificates
+
+# Set working dir
+WORKDIR /root/
+
+# Copy binary จาก builder stage
+COPY --from=builder /app/app .
+
+# Expose port (ถ้ามี)
+EXPOSE 3000
+
+# Command to run
+CMD ["./app"]
+
+```
+
+### docker-compose.yml
+
+```yaml
+services:
+  nginx:
+    image: nginx:latest
+    container_name: nginx-proxy
+    ports:
+      - '80:80'
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - app
+
+  app:
+    build: .
+    container_name: backend-app
+```
+
+### Run
+
+```bash
+docker compose up -d --build
+```
+
+ทดสอบเรียก `curl` http://localhost/users/1
+
+---
+
+## ผลลัพธ์
+
+เรียกดู Log ด้วยคำสั่ง `docker compose logs app`
+
+```bash
+backend-app  | {"level":"info","ts":1751602673.5724216,"caller":"service/user_service.go:20","msg":"calling repo","app_name":"demo-logger","request_id":"29988fdef291b7afaadaa872cea0d5ba","user_id":"1"}
+backend-app  | {"level":"info","ts":1751602673.5769289,"caller":"repository/user_repository.go:19","msg":"querying database","app_name":"demo-logger","request_id":"29988fdef291b7afaadaa872cea0d5ba","user_id":"1"}
+backend-app  | {"level":"info","ts":1751602673.5770924,"caller":"handler/user_handler.go:28","msg":"success get user","app_name":"demo-logger","request_id":"29988fdef291b7afaadaa872cea0d5ba","user_id":"1"}
+```
+
+ทุก Log ที่เกิดใน Handler, Service, Repo จะมี `request_id` ติดไปด้วย ทำให้เรา grep หรือ trace cross-service ได้ง่าย
+
+---
+
+## สรุป
+
+**Request ID** หรือ **Correlation ID** คือวิธีง่าย ๆ ที่ช่วยให้การ Debug ระบบ Distributed หรือ Microservices เป็นเรื่องง่ายขึ้น
+
+จุดสำคัญคือ generate ID ครั้งเดียวที่ Proxy แล้วส่งต่อทุกจุดใน Layer ด้วย `context.Context`
+
+Logger ต้องสร้างครั้งเดียวใน Middleware แล้วใช้ Logger จาก Context ทั้งหมด
+
+แค่นี้คุณจะมี Log ที่เชื่อมโยงได้ชัดเจน ลดเวลาหา Bug ได้มาก
