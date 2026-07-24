@@ -1,0 +1,417 @@
+---
+title: 'เพิ่ม Web Search ให้ Claude Code ที่ใช้ MiniMax ผ่าน 9router'
+date: '2026-07-24'
+lastmod: '2026-07-24'
+tags: ['claude', skill']
+draft: false
+summary: 'เลือกใช้ Google AI Mode Skill เพื่อเพิ่มความสามารถในการค้นข้อมูลจากอินเทอร์เน็ตให้ Claude Code โดยไม่กระทบโครงสร้าง MiniMax และ 9router เดิม'
+---
+
+# เพิ่ม Web Search ให้ Claude Code ที่ใช้ MiniMax ผ่าน 9router
+
+ปัจจุบันทีมใช้งาน Claude Code CLI โดยมีโครงสร้างดังนี้:
+
+```text
+Claude Code CLI
+      ↓
+9router
+      ↓
+MiniMax Token Plan
+```
+
+9router ทำหน้าที่เป็น API Gateway กลาง สมาชิกในทีมจึงไม่จำเป็นต้องได้รับ MiniMax API Key โดยตรง ช่วยให้ทีมควบคุมการใช้งาน Model, Routing และ Credential ได้จากจุดเดียว
+
+อย่างไรก็ตาม MiniMax Web Search ยังไม่ได้เชื่อมต่อผ่าน MCP เนื่องจากการติดตั้งในลักษณะนั้นอาจต้องแจก API Key หรือ Credential เพิ่มเติมให้กับเครื่องของสมาชิกแต่ละคน
+
+เราจึงเลือกใช้ **Google AI Mode Skill** เพื่อเพิ่มความสามารถในการค้นข้อมูลจากอินเทอร์เน็ตให้ Claude Code โดยไม่กระทบโครงสร้าง MiniMax และ 9router เดิม
+
+---
+
+## Google AI Mode Skill คืออะไร
+
+Google AI Mode Skill เป็น Skill ที่ติดตั้งบนเครื่องของผู้ใช้ Claude Code แต่ละคน ทำหน้าที่เปิด Google AI Mode ผ่าน Browser Automation แล้วนำคำตอบพร้อมแหล่งอ้างอิงกลับมาให้ Claude Code
+
+จุดสำคัญคือ Skill นี้:
+
+- ไม่ต้องใช้ MiniMax API Key
+- ไม่ต้องเชื่อม MiniMax Web Search MCP
+- ไม่ต้องแก้ Configuration ของ 9router
+- ไม่ต้องสมัคร Google Search API
+- ทำงานผ่าน Google Chrome บนเครื่องของผู้ใช้
+- ส่งผลลัพธ์กลับมาเป็น Markdown พร้อมแหล่งอ้างอิง
+
+Repository ระบุว่า Skill ทำงานกับ Claude Code CLI ที่ติดตั้งในเครื่องเท่านั้น และไม่สามารถใช้กับ Claude Web เนื่องจากต้องใช้ Network Access และ Browser Automation
+
+---
+
+## Architecture หลังติดตั้ง
+
+เมื่อเพิ่ม Google AI Mode Skill ระบบจะมีเส้นทางการทำงานสองส่วนแยกจากกัน
+
+```text
+                    ┌──────────────────────────┐
+                    │     Claude Code CLI      │
+                    └────────────┬─────────────┘
+                                 │
+               ┌─────────────────┴─────────────────┐
+               │                                   │
+               ▼                                   ▼
+     การประมวลผลด้วย Model                 การค้นข้อมูลบน Web
+               │                                   │
+               ▼                                   ▼
+           9router                     Google AI Mode Skill
+               │                                   │
+               ▼                                   ▼
+     MiniMax Token Plan                 Chrome บนเครื่องผู้ใช้
+                                                   │
+                                                   ▼
+                                         Google AI Mode
+```
+
+การเรียก Model ยังคงผ่าน 9router ตามเดิม ส่วนการค้นข้อมูลจะออกจากเครื่องผู้ใช้ไปยัง Google โดยตรง
+
+ดังนั้นสมาชิกในทีมยังคงใช้ MiniMax ผ่าน Token Plan กลาง โดยไม่จำเป็นต้องทราบ MiniMax API Key
+
+---
+
+## หลักการทำงาน
+
+เมื่อผู้ใช้ถามคำถามที่ต้องใช้ข้อมูลปัจจุบัน เช่น:
+
+```text
+ค้นหา Breaking Changes ของ PostgreSQL 18
+พร้อมตัวอย่าง Migration และ Source อ้างอิง
+```
+
+Claude Code จะดำเนินการดังนี้:
+
+```text
+ผู้ใช้ส่งคำถาม
+      ↓
+Claude Code ตรวจพบว่าต้องค้นข้อมูลบน Web
+      ↓
+เรียก Google AI Mode Skill
+      ↓
+Skill เปิด Chrome ผ่าน Patchright
+      ↓
+ส่ง Query ไปยัง Google AI Mode
+      ↓
+Google ค้นหาและสังเคราะห์ข้อมูลจากหลายเว็บไซต์
+      ↓
+Skill ดึงคำตอบและ Source Links
+      ↓
+แปลงผลลัพธ์เป็น Markdown
+      ↓
+ส่งกลับให้ MiniMax วิเคราะห์และตอบผู้ใช้
+```
+
+Skill ใช้ Browser Profile แบบถาวร เพื่อเก็บ Cookie และ Session ระหว่างการค้นหา ทำให้หลังจากผ่าน CAPTCHA ครั้งแรกแล้ว การใช้งานครั้งถัดไปมักทำงานได้ต่อเนื่องมากขึ้น
+
+---
+
+## ทำไมจึงเหมาะกับระบบของทีม
+
+### ไม่ต้องแจก MiniMax API Key
+
+สมาชิกในทีมยังคงเรียก Model ผ่าน 9router เหมือนเดิม Google AI Mode Skill ไม่ได้เรียก MiniMax Web Search API และไม่ต้องใช้ MiniMax Credential
+
+จึงยังรักษารูปแบบ Centralized Credential Management ของทีมไว้ได้
+
+### ไม่ต้องแก้ 9router
+
+Skill ทำงานในระดับ Claude Code โดยเรียก Python Script และ Browser บนเครื่องผู้ใช้ ไม่ได้เพิ่ม Tool หรือ Endpoint ใหม่ใน 9router
+
+โครงสร้าง Model Routing เดิมจึงไม่ต้องเปลี่ยนแปลง
+
+### ลด Token ที่ใช้ในการค้นคว้า
+
+การค้นหาแบบทั่วไปอาจทำให้ Model ต้อง:
+
+1. ค้นหาหลายครั้ง
+2. เปิดเว็บไซต์หลายหน้า
+3. อ่านเนื้อหาจำนวนมาก
+4. สรุปข้อมูลเอง
+
+แต่ Google AI Mode จะสังเคราะห์ข้อมูลก่อน แล้วส่งคำตอบพร้อม Source กลับมาเป็นชุดเดียว ทำให้ MiniMax ใช้ Token กับการวิเคราะห์ผลลัพธ์มากกว่าการอ่านข้อมูลดิบจากหลายหน้า
+
+### ได้ข้อมูลพร้อมแหล่งอ้างอิง
+
+ผลลัพธ์จาก Skill จะอยู่ในรูปแบบ Markdown เช่น:
+
+```markdown
+PostgreSQL รองรับ JSONB และสามารถสร้าง GIN Index
+เพื่อเพิ่มประสิทธิภาพการค้นหาได้[1]
+
+## Sources
+
+[1] PostgreSQL Documentation
+https://www.postgresql.org/docs/
+```
+
+ทีมสามารถเปิด Source ต้นฉบับเพื่อตรวจสอบข้อมูลก่อนนำไปใช้งานได้
+
+### ใช้ได้กับหลายประเภทงาน
+
+ตัวอย่างงานที่เหมาะสม ได้แก่:
+
+- ค้น Documentation ล่าสุด
+- ตรวจสอบ API และ Breaking Changes
+- หา Coding Examples
+- เปรียบเทียบ Framework หรือ Library
+- ค้น Security Best Practices
+- ตรวจสอบ Version Compatibility
+- วิเคราะห์ Error ที่เกี่ยวข้องกับ Package เวอร์ชันใหม่
+- ค้นมาตรฐานหรือกฎหมายที่เพิ่งเปลี่ยนแปลง
+
+---
+
+## สิ่งที่ต้องมีก่อนติดตั้ง
+
+แต่ละเครื่องต้องมี:
+
+- Claude Code CLI
+- Git
+- Python 3.8 ขึ้นไป
+- Internet Connection
+- สิทธิ์ติดตั้งหรือใช้งาน Google Chrome
+
+ตรวจสอบด้วยคำสั่ง:
+
+```bash
+claude --version
+git --version
+python3 --version
+```
+
+สำหรับ Windows:
+
+```powershell
+python --version
+```
+
+---
+
+## วิธีติดตั้งบน macOS และ Linux
+
+เปิด Terminal แล้วรัน:
+
+```bash
+mkdir -p ~/.claude/skills
+cd ~/.claude/skills
+
+git clone https://github.com/PleasePrompto/google-ai-mode-skill google-ai-mode
+```
+
+จากนั้นเปิด Claude Code:
+
+```bash
+claude
+```
+
+ตรวจสอบว่า Claude มองเห็น Skill:
+
+```text
+What skills do I have?
+```
+
+ควรพบ Skill ชื่อ Google AI Mode
+
+Repository กำหนดให้ติดตั้งโดย Clone โครงการไว้ที่ `~/.claude/skills/google-ai-mode` หลังจากนั้น Claude Code จะอ่านคำสั่งจากไฟล์ `SKILL.md` และเลือกเรียกใช้งานเมื่อเหมาะสม
+
+---
+
+## วิธีติดตั้งบน Windows PowerShell
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null
+
+Set-Location "$HOME\.claude\skills"
+
+git clone https://github.com/PleasePrompto/google-ai-mode-skill google-ai-mode
+```
+
+จากนั้นเปิด Claude Code:
+
+```powershell
+claude
+```
+
+แล้วตรวจสอบ Skill:
+
+```text
+What skills do I have?
+```
+
+---
+
+## การใช้งานครั้งแรก
+
+ลองสั่ง Claude Code:
+
+```text
+Search Google AI Mode for:
+PostgreSQL 17 JSONB performance best practices.
+Include indexing examples and source citations.
+```
+
+ครั้งแรกที่เรียกใช้ `run.py` ระบบจะจัดเตรียม Environment ให้อัตโนมัติ ได้แก่:
+
+- สร้าง `.venv`
+- ติดตั้ง Python Dependencies
+- ติดตั้ง Chrome สำหรับ Patchright
+- สร้าง Browser Profile
+- เรียก Script สำหรับค้นข้อมูล
+
+กระบวนการสร้าง Virtual Environment และติดตั้ง Dependency ถูกแยกไว้ภายใน Skill Folder จึงไม่กระทบ Python Package หลักของเครื่อง
+
+Setup Script จะติดตั้ง Package จาก `requirements.txt` และเรียก Patchright เพื่อติดตั้ง Chrome ที่ใช้กับ Browser Automation
+
+---
+
+## กรณีพบ CAPTCHA
+
+การใช้งานครั้งแรก Google อาจแสดง CAPTCHA
+
+ให้สั่ง Claude:
+
+```text
+Run that search with visible browser.
+```
+
+หรือรันด้วยตนเอง:
+
+```bash
+cd ~/.claude/skills/google-ai-mode
+
+python scripts/run.py search.py \
+  --query "PostgreSQL 17 JSONB performance" \
+  --show-browser
+```
+
+เมื่อ Browser เปิดขึ้นมา ให้แก้ CAPTCHA ตามปกติ จากนั้น Skill จะเก็บ Browser Profile ไว้สำหรับการค้นหาครั้งต่อไป
+
+---
+
+## ตัวอย่าง Prompt สำหรับทีมพัฒนา
+
+### ค้น Documentation
+
+```text
+Search Google AI Mode for:
+OpenTelemetry Collector latest production configuration
+(memory limiter, batch processor, retry and sending queue).
+Include official documentation and YAML examples.
+```
+
+### ตรวจสอบ Breaking Changes
+
+```text
+Search Google AI Mode for:
+Go Fiber latest major version breaking changes.
+Include migration steps and code examples.
+```
+
+### เปรียบเทียบเทคโนโลยี
+
+```text
+Search Google AI Mode for:
+Kafka vs NATS JetStream 2026
+(high availability, message ordering, replay, operations).
+Provide a comparison table and recommendations.
+```
+
+### วิเคราะห์ Error
+
+```text
+Research this error using Google AI Mode:
+
+cannot find module providing package ...
+
+Prioritize official documentation, GitHub issues and recent fixes.
+```
+
+Query ที่ระบุ Version, ปี, ประเด็นที่ต้องการ และรูปแบบ Output อย่างชัดเจน จะให้ผลลัพธ์ดีกว่า Query สั้นหรือกว้างเกินไป
+
+---
+
+## ข้อควรระวังด้านข้อมูล
+
+แม้ MiniMax Request จะยังผ่าน 9router แต่ Query ที่ส่งเข้า Google AI Mode จะถูกส่งจากเครื่องผู้ใช้ไปยัง Google โดยตรง
+
+ดังนั้นไม่ควรส่งข้อมูลต่อไปนี้เข้า Web Search:
+
+- Source Code ที่เป็นความลับทั้งไฟล์
+- Password, Token หรือ API Key
+- Connection String
+- ข้อมูลผู้ป่วย
+- Personal Identifiable Information
+- ข้อมูลภายในโครงการที่ยังไม่เปิดเผย
+- Log ที่มี Credential หรือข้อมูลสำคัญ
+
+ควรตัดเฉพาะ Error Message, Technology Version และบริบทที่จำเป็นออกมาค้นหาแทน
+
+ตัวอย่างที่ไม่ควรใช้:
+
+```text
+นี่คือไฟล์ Configuration Production ทั้งหมดของโรงพยาบาล
+ช่วยค้นหาว่าผิดตรงไหน
+```
+
+ตัวอย่างที่เหมาะสมกว่า:
+
+```text
+OpenTelemetry Collector reports:
+sending queue is full
+
+What are the likely causes and recommended production settings?
+```
+
+Browser Profile จะถูกเก็บไว้ในเครื่องผู้ใช้ที่:
+
+```text
+~/.cache/google-ai-mode-skill/chrome_profile
+```
+
+ภายในอาจมี Cookie และ Session ของ Google จึงไม่ควรนำ Folder นี้ไป Commit หรือ Upload เข้า Repository กลาง
+
+---
+
+## ข้อจำกัด
+
+Google AI Mode Skill มีข้อจำกัดที่ควรทราบ:
+
+- ใช้งานได้เฉพาะ Claude Code แบบ Local
+- ต้องมี Python 3.8 ขึ้นไป
+- ต้องสามารถเปิด Chrome ได้
+- การค้นหาถี่เกินไปอาจพบ CAPTCHA
+- Google AI Mode อาจไม่รองรับในบาง Region
+- ผลลัพธ์จาก AI ยังต้องตรวจสอบกับ Source ต้นฉบับ
+- การค้นหาไม่ได้ผ่าน 9router หรือระบบ Audit ของ MiniMax
+
+Repository แนะนำให้ใช้ Browser Automation อย่างรับผิดชอบ ระวัง Rate Limit และตรวจสอบข้อมูลสำคัญจาก Source ที่แนบมาเสมอ
+
+---
+
+## สรุป
+
+Google AI Mode Skill ช่วยเติมความสามารถ Web Search ให้ Claude Code โดยไม่ต้องแก้ระบบ MiniMax ผ่าน 9router เดิม
+
+```text
+Model Processing
+Claude Code → 9router → MiniMax
+
+Web Research
+Claude Code → Local Google AI Mode Skill → Google
+```
+
+ทีมจึงได้รับประโยชน์ดังนี้:
+
+- ไม่ต้องแจก MiniMax API Key
+- ไม่ต้องเปิด MiniMax Web Search MCP
+- ยังควบคุม Model Usage ผ่าน 9router ได้
+- สมาชิกแต่ละคนค้นข้อมูลปัจจุบันได้
+- ได้คำตอบพร้อม Source อ้างอิง
+- ลด Token ที่ใช้ในการอ่านเว็บไซต์หลายหน้า
+- ติดตั้งเพิ่มได้โดยไม่กระทบ Architecture เดิม
+
+แนวทางนี้เหมาะสำหรับเพิ่มความสามารถด้าน Research และค้น Documentation ให้ Claude Code โดยยังรักษาการบริหาร Credential ของ MiniMax แบบรวมศูนย์ไว้ที่ 9router

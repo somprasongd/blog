@@ -1,0 +1,357 @@
+---
+title: 'Google AI Mode Skill: เพิ่มพลังการค้นคว้าให้ Claude Code'
+date: '2026-07-24'
+lastmod: '2026-07-24'
+tags: ['claude', skill']
+draft: false
+summary: 'Google AI Mode Skill ช่วยลดขั้นตอนเหล่านี้ โดยให้ Claude Code ส่งคำถามไปยัง Google AI Mode แล้วรับคำตอบที่ Google สังเคราะห์จากหลายเว็บไซต์ พร้อมรายการแหล่งอ้างอิงกลับมาโดยตรง'
+---
+
+# Google AI Mode Skill: เพิ่มพลังการค้นคว้าให้ Claude Code
+
+เวลาที่เราให้ AI ช่วยค้นข้อมูลบนอินเทอร์เน็ต กระบวนการทั่วไปมักเป็นแบบนี้:
+
+1. ค้นหาจาก Google
+2. เปิดเว็บไซต์หลายหน้า
+3. อ่านและสรุปข้อมูล
+4. เปรียบเทียบข้อมูลจากแต่ละแหล่ง
+5. นำผลลัพธ์มาตอบผู้ใช้
+
+กระบวนการนี้ใช้เวลานาน ใช้ Token จำนวนมาก และมีโอกาสพลาดข้อมูลสำคัญ
+
+**Google AI Mode Skill** ช่วยลดขั้นตอนเหล่านี้ โดยให้ Claude Code ส่งคำถามไปยัง Google AI Mode แล้วรับคำตอบที่ Google สังเคราะห์จากหลายเว็บไซต์ พร้อมรายการแหล่งอ้างอิงกลับมาโดยตรง
+
+---
+
+## Google AI Mode Skill คืออะไร
+
+Google AI Mode Skill เป็น Skill สำหรับ **Claude Code CLI ที่ติดตั้งและทำงานบนเครื่องของเรา**
+
+Skill นี้ทำหน้าที่เชื่อม Claude Code เข้ากับ Google AI Mode ผ่าน Browser Automation เมื่อ Claude ต้องการข้อมูลปัจจุบัน ตัวอย่างโค้ด เอกสาร Library หรือข้อมูลจากอินเทอร์เน็ต Claude สามารถเรียก Skill นี้เพื่อค้นหาและรับผลลัพธ์ในรูปแบบ Markdown พร้อม Citation ได้
+
+จุดสำคัญคือ:
+
+- ใช้งานกับ **Claude Code แบบ Local เท่านั้น**
+- ไม่สามารถใช้กับ Claude Web ได้
+- ไม่ต้องใช้ Google API Key
+- ใช้ Google Search ผ่าน Browser จริง
+- สร้าง Python Virtual Environment แยกจากระบบให้อัตโนมัติ
+- เก็บ Browser Profile และ Session ไว้ในเครื่อง
+
+Repository ระบุชัดว่า Skill นี้ออกแบบมาสำหรับ Claude Code CLI และต้องมี Network Access สำหรับควบคุม Browser จึงไม่สามารถทำงานใน Sandbox ของ Claude Web ได้
+
+---
+
+## หลักการทำงาน
+
+ภาพรวมการทำงานมีดังนี้:
+
+```text
+ผู้ใช้ถามคำถามกับ Claude Code
+              ↓
+Claude ตรวจพบว่าต้องค้นข้อมูลจากอินเทอร์เน็ต
+              ↓
+Claude เรียก Google AI Mode Skill
+              ↓
+Skill เปิด Google Chrome ผ่าน Patchright
+              ↓
+ส่งคำถามไปยัง Google AI Mode
+              ↓
+Google ค้นหาและสังเคราะห์ข้อมูลจากหลายเว็บไซต์
+              ↓
+Skill ดึงคำตอบและแหล่งอ้างอิงจากหน้าเว็บ
+              ↓
+แปลงผลลัพธ์เป็น Markdown
+              ↓
+ส่งกลับให้ Claude นำไปใช้งานต่อ
+```
+
+ภายใน Skill มีไฟล์สำคัญ ได้แก่:
+
+```text
+google-ai-mode/
+├── SKILL.md
+├── scripts/
+│   ├── run.py
+│   ├── search.py
+│   ├── browser_utils.py
+│   └── config.py
+├── .venv/
+└── results/
+```
+
+`SKILL.md` บอก Claude ว่าควรเรียก Skill เมื่อใด เช่น เมื่อต้องการข้อมูลล่าสุด เอกสาร API ตัวอย่างโค้ด การเปรียบเทียบเทคโนโลยี หรือผลการค้นคว้าที่มีแหล่งอ้างอิง
+
+เมื่อ Skill ถูกเรียกใช้งาน `run.py` จะตรวจสอบและสร้าง `.venv` ให้อัตโนมัติ จากนั้นจึงรัน `search.py` ภายใน Environment ที่แยกออกมา
+
+Browser จะใช้ Profile เดิมระหว่างการค้นหา ทำให้สามารถเก็บ Cookie และ Session ไว้ได้ หลังจากผ่าน CAPTCHA ครั้งแรกแล้ว การค้นหาครั้งต่อไปจึงมักทำงานได้ต่อเนื่องมากขึ้น จากนั้นระบบจะดึงเนื้อหาและ Citation จากหน้า Google แล้วแปลงเป็น Markdown
+
+---
+
+## ใช้แล้วดีกว่าอย่างไร
+
+### 1. ลดการใช้ Token
+
+แทนที่ Claude จะต้องเปิดและอ่านเว็บไซต์หลายหน้า Claude จะได้รับคำตอบที่ Google AI Mode สังเคราะห์มาแล้วหนึ่งชุด
+
+ทำให้ Token ถูกใช้กับการวิเคราะห์และนำข้อมูลไปทำงานต่อ มากกว่าการอ่าน HTML หรือเนื้อหาจำนวนมากจากหลายเว็บไซต์
+
+### 2. ได้คำตอบพร้อมแหล่งอ้างอิง
+
+ผลลัพธ์จะถูกแปลงเป็น Markdown พร้อมหมายเลขอ้างอิง เช่น:
+
+```markdown
+PostgreSQL รองรับ JSONB และมีดัชนี GIN สำหรับค้นข้อมูล JSON[1]
+
+## Sources
+
+[1] PostgreSQL Documentation
+https://www.postgresql.org/docs/
+```
+
+ทีมสามารถเปิดแหล่งข้อมูลต้นฉบับเพื่อตรวจสอบความถูกต้องได้ทันที
+
+### 3. เหมาะกับข้อมูลที่เปลี่ยนแปลงเร็ว
+
+ตัวอย่างเช่น:
+
+- Version ใหม่ของ Framework
+- Breaking Changes
+- API Documentation
+- Security Best Practices
+- กฎหมายและมาตรฐานใหม่
+- การเปรียบเทียบผลิตภัณฑ์
+- ข่าวและข้อมูลเทคโนโลยีล่าสุด
+
+### 4. ไม่ต้องตั้งค่า API Key
+
+Skill ใช้ Public Google Search ผ่าน Browser จึงไม่ต้องสมัคร API หรือสร้าง Credential เพิ่มเติม
+
+### 5. ติดตั้งง่ายและแยก Environment
+
+Dependency ทั้งหมดจะถูกติดตั้งไว้ใน `.venv` ภายใน Skill Folder ไม่กระทบ Python Package ของระบบ และขั้นตอน Setup จะติดตั้ง Package รวมถึง Chrome สำหรับ Patchright ให้อัตโนมัติ
+
+---
+
+## สิ่งที่ต้องมีก่อนติดตั้ง
+
+ตรวจสอบว่าเครื่องมี:
+
+- Claude Code CLI
+- Git
+- Python 3.8 ขึ้นไป
+- Internet Connection
+
+ตรวจสอบ Version:
+
+```bash
+claude --version
+git --version
+python3 --version
+```
+
+บน Windows อาจใช้:
+
+```powershell
+python --version
+```
+
+---
+
+## วิธีติดตั้งบน macOS และ Linux
+
+เปิด Terminal แล้วรัน:
+
+```bash
+mkdir -p ~/.claude/skills
+cd ~/.claude/skills
+
+git clone https://github.com/PleasePrompto/google-ai-mode-skill google-ai-mode
+```
+
+จากนั้นเปิด Claude Code:
+
+```bash
+claude
+```
+
+แล้วถาม:
+
+```text
+What skills do I have?
+```
+
+หากติดตั้งถูกต้อง Claude ควรพบ Skill ชื่อ Google AI Mode
+
+ขั้นตอนติดตั้งหลักของโปรเจกต์คือการ Clone Repository ไปไว้ใน `~/.claude/skills/google-ai-mode` หลังจากนั้น Claude Code จะสามารถโหลด `SKILL.md` และเรียกใช้งาน Skill ได้
+
+---
+
+## วิธีติดตั้งบน Windows PowerShell
+
+เปิด PowerShell แล้วรัน:
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.claude\skills" | Out-Null
+
+Set-Location "$HOME\.claude\skills"
+
+git clone https://github.com/PleasePrompto/google-ai-mode-skill google-ai-mode
+```
+
+จากนั้นเปิด Claude Code:
+
+```powershell
+claude
+```
+
+แล้วถาม:
+
+```text
+What skills do I have?
+```
+
+---
+
+## การใช้งานครั้งแรก
+
+ลองถาม Claude Code:
+
+```text
+Search Google AI Mode for:
+PostgreSQL 17 JSONB performance best practices.
+Include indexing examples and source citations.
+```
+
+หรือถามตามธรรมชาติ:
+
+```text
+ช่วยค้น Best Practices ของ OpenTelemetry Collector เวอร์ชันล่าสุด
+พร้อมตัวอย่าง Configuration และแหล่งอ้างอิง
+```
+
+Claude จะพิจารณาเรียก Skill ตามคำอธิบายใน `SKILL.md`
+
+ในการรันครั้งแรก ระบบจะ:
+
+1. สร้าง `.venv`
+2. ติดตั้ง Python Dependencies
+3. ติดตั้ง Chrome สำหรับ Patchright
+4. สร้าง Browser Profile
+5. เปิด Google AI Mode และค้นข้อมูล
+
+---
+
+## กรณีพบ CAPTCHA
+
+ครั้งแรก Google อาจขอให้ยืนยันว่าเป็นมนุษย์
+
+ให้บอก Claude ว่า:
+
+```text
+Run that search with visible browser.
+```
+
+หรือรัน Script โดยตรง:
+
+```bash
+cd ~/.claude/skills/google-ai-mode
+
+python scripts/run.py search.py \
+  --query "PostgreSQL 17 JSONB performance" \
+  --show-browser
+```
+
+เมื่อ Browser เปิดขึ้นมา ให้แก้ CAPTCHA ตามปกติ หลังจากนั้น Browser Profile จะถูกบันทึกไว้ ทำให้ครั้งต่อไปมักไม่ต้องแก้ CAPTCHA ซ้ำ
+
+---
+
+## ตัวอย่าง Prompt ที่แนะนำ
+
+ควรระบุหัวข้อ Version ปี ประเด็นที่ต้องการ และรูปแบบผลลัพธ์ให้ชัดเจน
+
+รูปแบบที่แนะนำ:
+
+```text
+[หัวข้อ] [Version] [ปี]
+(ประเด็นที่ 1, ประเด็นที่ 2, ประเด็นที่ 3)
+[รูปแบบผลลัพธ์ที่ต้องการ]
+```
+
+ตัวอย่าง:
+
+```text
+PostgreSQL 17 performance tuning 2026
+(query planning, indexing, connection pooling, vacuum)
+Provide a checklist and configuration examples.
+```
+
+```text
+Go Fiber vs Gin 2026
+(performance, middleware, validation, observability, maintenance)
+Provide a comparison table and recommendations.
+```
+
+```text
+OpenTelemetry Collector production best practices 2026
+(memory limiter, batching, retry, queue, scaling)
+Include YAML configuration examples.
+```
+
+Query ที่เฉพาะเจาะจงจะช่วยให้ Google AI Mode สร้างผลลัพธ์ที่มีโครงสร้างและตรงกับความต้องการมากขึ้น
+
+---
+
+## ข้อควรระวัง
+
+เครื่องมือนี้ช่วยให้ Research เร็วขึ้น แต่ไม่ควรถือว่าคำตอบจาก Google AI Mode ถูกต้องทั้งหมด
+
+ควรตรวจสอบแหล่งอ้างอิงเพิ่มเติม โดยเฉพาะข้อมูลเกี่ยวกับ:
+
+- Security
+- กฎหมาย
+- การแพทย์
+- การเงิน
+- Production Configuration
+- Breaking Changes
+- API ที่มีการเปลี่ยน Version
+
+นอกจากนี้ การค้นหาถี่เกินไปอาจทำให้ Google แสดง CAPTCHA หรือจำกัดการใช้งาน และบางพื้นที่อาจยังไม่รองรับ Google AI Mode
+
+Repository ยังแนะนำให้ใช้งาน Browser Automation อย่างรับผิดชอบ คำนึงถึงข้อกำหนดของ Google และตรวจสอบข้อมูลสำคัญจาก Source ต้นฉบับเสมอ
+
+---
+
+## Skill หรือ MCP ควรเลือกอะไร
+
+เลือก **Google AI Mode Skill** เมื่อ:
+
+- ใช้ Claude Code เป็นหลัก
+- ต้องการติดตั้งง่ายด้วย Git Clone
+- ไม่ต้องการรัน MCP Server เพิ่ม
+- ต้องการเก็บทุกอย่างไว้ภายใน Skill Folder
+
+เลือก **Google AI Mode MCP Server** เมื่อ:
+
+- ต้องการใช้ร่วมกับหลาย Agent
+- ใช้ Codex, Cursor, Cline หรือ Windsurf
+- ต้องการเชื่อมต่อผ่าน Model Context Protocol
+
+Skill นี้รองรับเฉพาะ Claude Code Local ส่วน MCP Version รองรับเครื่องมือที่ทำงานกับ MCP ได้หลายประเภท
+
+---
+
+## สรุป
+
+Google AI Mode Skill เป็นเครื่องมือที่ช่วยให้ Claude Code ทำ Web Research ได้มีประสิทธิภาพมากขึ้น โดยเปลี่ยนจากการเปิดอ่านเว็บไซต์หลายหน้า มาเป็นการรับคำตอบที่ Google AI Mode สังเคราะห์ไว้แล้ว พร้อมแหล่งอ้างอิง
+
+ประโยชน์หลักคือ:
+
+- ลดเวลาในการค้นคว้า
+- ลดการใช้ Token
+- ได้คำตอบที่มีโครงสร้าง
+- มี Source สำหรับตรวจสอบ
+- ไม่ต้องใช้ API Key
+- ติดตั้งง่ายและทำงานภายในเครื่อง
+
+สำหรับทีมที่ใช้ Claude Code ช่วยพัฒนา Software, วิเคราะห์เทคโนโลยี หรือค้น Documentation เครื่องมือนี้เป็นอีกหนึ่ง Skill ที่ควรทดลองใช้งาน โดยยังคงต้อง Review คำตอบและตรวจสอบ Source ต้นฉบับก่อนนำไปใช้จริง
